@@ -1,0 +1,3949 @@
+version: '0.1'
+
+topics:
+  - name: "MongoDB Server Configuration"
+    paths:
+      - '**/*.yml'
+      - '**/*.yaml'
+      - '**/*.conf'
+
+    policies:
+
+      - title: "Authorization Must Be Enabled on MongoDB Servers"
+        description: |
+          The MongoDB server configuration must enable access control by setting `security.authorization` to "enabled" in `mongod.conf` or using the `--auth` flag.
+        impact: |
+          Disabling authorization allows any connected client to read or modify data, violating security and compliance requirements.
+        severity: Mandatory
+        required_context: single-file
+        software_version: all
+        reference_link: https://www.mongodb.com/docs/manual/reference/parameters/#startup-option--auth
+        code_examples:
+          # YAML examples
+          - non_compliant: |
+              # mongod.conf
+              security:
+                authorization: disabled
+
+              # docker-compose.yml
+              services:
+                mongo:
+                  image: mongo:8
+                  command: ["mongod", "--bind_ip_all"]
+            compliant: |
+              # mongod.conf
+              security:
+                authorization: "enabled"
+
+              # docker-compose.yml
+              services:
+                mongo:
+                  image: mongo:8
+                  command: ["mongod", "--bind_ip_all", "--auth"]
+
+      - title: "MongoDB Bind IP Must Not Be 0.0.0.0 (or '*') in Production Configurations"
+        description: |
+          MongoDB must not be bound to all interfaces (`0.0.0.0`, `::`, or `--bind_ip_all`).
+        impact: |
+          Binding to all interfaces broadens attack surface and risks accidental internet exposure.
+        severity: High
+        required_context: single-file
+        software_version: all
+        reference_link: https://www.mongodb.com/docs/manual/reference/configuration-options/#mongodb-setting-net.bindip
+        code_examples:
+          # YAML examples
+          - non_compliant: |
+              # mongod.conf
+              net:
+                bindIp: 0.0.0.0
+
+              # docker-compose.yml
+              services:
+                mongo:
+                  command: ["mongod", "--bind_ip_all"]
+            compliant: |
+              # mongod.conf
+              net:
+                bindIp: 127.0.0.1
+
+              # docker-compose.yml
+              services:
+                mongo:
+                  command: ["mongod", "--bind_ip", "127.0.0.1"]
+
+      - title: "Auditing Must Be Configured with Filters for Auth, Role Changes, and Schema Operations"
+        description: |
+          Audit logging configuration must include filters for authentication checks, user and role changes, and schema operations.
+        impact: |
+          Auditing provides forensic evidence, improves incident response, and supports compliance.
+        severity: Mandatory
+        required_context: single-file
+        software_version: all
+        reference_link: https://www.mongodb.com/docs/manual/tutorial/configure-auditing/
+        code_examples:
+          # YAML examples
+          - non_compliant: |
+              # mongod.conf - audit logging disabled or missing filters
+              auditLog:
+                destination: file
+                format: JSON
+                path: /var/log/mongodb/audit.json
+                # Missing filter configuration
+            compliant: |
+              # mongod.conf
+              auditLog:
+                destination: file
+                format: JSON
+                path: /var/log/mongodb/audit.json
+                filter: '{ atype: { $in: ["authCheck", "createUser", "updateRole", "dropCollection"] } }'
+
+      - title: "Encrypt Data At Rest and Rotate Keys Using KMIP/KMS"
+        description: |
+          WiredTiger encryption and KMS/KMIP must be enabled in MongoDB configuration.
+        impact: |
+          Encryption at rest protects data in backups and disks; key rotation limits damage from key leaks.
+        severity: High
+        required_context: single-file
+        software_version: all
+        reference_link: https://www.mongodb.com/docs/manual/core/security-encryption-at-rest/
+        code_examples:
+          # YAML examples
+          - non_compliant: |
+              # mongod.conf - encryption disabled and no KMS/KMIP configuration
+              security:
+                enableEncryption: false
+              # Missing kmip section entirely
+            compliant: |
+              # mongod.conf
+              security:
+                enableEncryption: true
+                encryptionKeyFile: /etc/mongo/keyfile
+              kmip:
+                serverName: kmip.internal
+                port: 5696
+
+      - title: "Set Logical Session Timeout Explicitly"
+        description: |
+          MongoDB configuration must set logicalSessionTimeoutMinutes.
+        impact: |
+          Prevents zombie sessions and ensures timely cleanup of abandoned or stale transactions.
+        severity: High
+        required_context: single-file
+        software_version: all
+        reference_link: https://www.mongodb.com/docs/manual/reference/parameters/#logicalsessiontimeoutminutes
+        code_examples:
+          # YAML examples
+          - non_compliant: |
+              # mongod.conf - missing logicalSessionTimeoutMinutes setting
+              storage:
+                dbPath: /var/lib/mongodb
+              net:
+                port: 27017
+                bindIp: 127.0.0.1
+              # setParameter section missing logicalSessionTimeoutMinutes
+            compliant: |
+              # mongod.conf
+              storage:
+                dbPath: /var/lib/mongodb
+              net:
+                port: 27017
+                bindIp: 127.0.0.1
+              setParameter:
+                logicalSessionTimeoutMinutes: 30
+
+      - title: "Set Minimum Oplog Size"
+        description: |
+          The oplog size must be set to at least 10GB.
+        impact: |
+          Prevents secondaries from falling off replication during delays and enables point-in-time recovery.
+        severity: High
+        required_context: single-file
+        software_version: all
+        reference_link: https://www.mongodb.com/docs/manual/core/replica-set-oplog/#oplog-size
+        code_examples:
+          # YAML examples
+          - non_compliant: |
+              # mongod.conf - oplog size below minimum
+              replication:
+                replSetName: "rs0"
+                oplogSizeMB: 50
+            compliant: |
+              # mongod.conf
+              replication:
+                replSetName: "rs0"
+                oplogSizeMB: 10240  # 10GB
+
+
+  - name: "MongoDB Version Pinning in Dependencies"
+    paths:
+      - '**/*.json'
+      - '**/Dockerfile'
+
+    policies:
+
+      - title: "MongoDB Dependencies Must Be Version-Pinned to Patched Releases"
+        description: |
+          MongoDB dependencies and Docker images must be version-pinned to specific patched releases in JSON and Dockerfile configurations.
+        impact: |
+          Prevents known vulnerabilities and ensures reproducible builds.
+        severity: High
+        required_context: multi-file
+        software_version: all
+        reference_link: https://www.mongodb.com/docs/manual/tutorial/upgrade-revision/
+        code_examples:
+          # Dockerfile examples
+          - non_compliant: |
+              # Dockerfile
+              FROM mongo:latest
+            compliant: |
+              # Dockerfile
+              FROM mongo:7.0.17
+          # JSON examples
+          - non_compliant: |
+              # package.json
+              "mongodb": "*"
+            compliant: |
+              # package.json
+              "mongodb": "6.0.3"
+
+  - name: "MongoDB Authentication Mechanisms on Applications"
+    paths:
+      - '**/*.js'
+      - '**/*.ts'
+      - '**/*.py'
+
+    policies:
+
+      - title: "Allowed Authentication Mechanisms Must Be Explicit (SCRAM-SHA-256, X.509, OIDC); LDAP Deprecated"
+        description: |
+          Code and config must use supported authentication mechanisms (e.g., SCRAM-SHA-256, X.509, OIDC).
+        impact: |
+          Ensures modern, secure authentication and avoids deprecated or less secure mechanisms.
+        severity: Mandatory
+        required_context: single-file
+        software_version: all
+        reference_link: https://www.mongodb.com/docs/manual/core/authentication/
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              // Deprecated: Using MONGODB-CR
+              const client = new MongoClient("mongodb://user:pass@db:27017/db?authMechanism=MONGODB-CR");
+            compliant: |
+              const client = new MongoClient("mongodb://user:pass@db:27017/db?authMechanism=SCRAM-SHA-256");
+          # TypeScript examples
+          - non_compliant: |
+              const client: MongoClient = new MongoClient("mongodb://user:pass@db:27017/db?authMechanism=MONGODB-CR");
+            compliant: |
+              const client: MongoClient = new MongoClient("mongodb://user:pass@db:27017/db?authMechanism=SCRAM-SHA-256");
+          # Python examples
+          - non_compliant: |
+              MongoClient("mongodb://user:pass@db:27017/db?authMechanism=MONGODB-CR")
+            compliant: |
+              MongoClient("mongodb://user:pass@db:27017/db?authMechanism=SCRAM-SHA-256")
+
+      - title: "Application Users Must Not Be Granted Broad Admin Roles"
+        description: |
+          Application user creation must not assign broad admin roles such as `root`, `clusterAdmin`, or `userAdminAnyDatabase`.
+        impact: |
+          Over-privileged accounts increase the risk and impact of a security breach, violating least-privilege and compliance mandates.
+        severity: High
+        required_context: single-file
+        software_version: all
+        reference_link:
+          - https://www.mongodb.com/docs/manual/reference/built-in-roles/
+          - https://www.mongodb.com/docs/manual/tutorial/manage-users-and-roles/
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              db.createUser({
+                user: "app",
+                pwd: "pass",
+                roles: [ { role: "root", db: "admin" } ]
+              });
+            compliant: |
+              db.createUser({
+                user: "app",
+                pwd: "pass",
+                roles: [ { role: "readWrite", db: "orders" } ]
+              });
+          # TypeScript examples
+          - non_compliant: |
+              // Assigning broad admin role (not allowed)
+              await db.admin().command({
+                createUser: "app",
+                pwd: "pass",
+                roles: [ { role: "root", db: "admin" } ]
+              });
+            compliant: |
+              // Assigning least-privilege application role
+              await db.command({
+                createUser: "app",
+                pwd: "pass",
+                roles: [ { role: "readWrite", db: "orders" } ]
+              });
+
+              // Or for a specific app DB
+              await db.command({
+                createUser: "app",
+                pwd: "pass",
+                roles: [ { role: "readWrite", db: "appdb" } ]
+              });
+          # Python examples
+          - non_compliant: |
+              client.admin.command(
+                "createUser", "app",
+                pwd="p",
+                roles=[{"role": "clusterAdmin", "db": "admin"}]
+              )
+            compliant: |
+              client.get_database("appdb").command(
+                "createUser", "app",
+                pwd="p",
+                roles=[{"role": "readWrite", "db": "appdb"}]
+              )
+
+  - name: "MongoDB X.509 Authentication Configuration"
+    paths:
+      - '**/*.conf'
+      - '**/*.yaml'
+      - '**/*.yml'
+
+    policies:
+
+      - title: "X.509 Authentication Configuration Must Include Required TLS and Certificate Settings"
+        description: |
+          MongoDB configuration must specify TLS mode as requireTLS, include certificateKeyFile path, and set clusterAuthMode to x509.
+        impact: |
+          Proper X.509 configuration ensures secure certificate-based authentication and prevents unauthorized access.
+        severity: High
+        required_context: single-file
+        software_version: all
+        reference_link: https://www.mongodb.com/docs/manual/tutorial/configure-x509-client-authentication/
+        code_examples:
+          # YAML examples
+          - non_compliant: |
+              # mongod.conf - Missing X.509 configuration
+              net:
+                port: 27017
+                bindIp: localhost
+              security:
+                authorization: enabled
+            compliant: |
+              # mongod.conf - Proper X.509 configuration
+              net:
+                port: 27017
+                bindIp: localhost
+                tls:
+                  mode: requireTLS
+                  certificateKeyFile: /etc/ssl/mongodb.pem
+                  CAFile: /etc/ssl/ca.pem
+              security:
+                authorization: enabled
+                clusterAuthMode: x509
+
+  - name: "MongoDB Application Security & Best Practices"
+    paths:
+      - '**/*.js'
+      - '**/*.ts'
+      - '**/*.py'
+
+    policies:
+
+      - title: "Connection URIs Must Not Contain Plaintext Credentials"
+        description: |
+          Application code and config must not include plaintext usernames, passwords, or API keys in MongoDB URIs or constants.
+        impact: |
+          Hardcoded secrets can leak via version control, logs, and error traces, leading to credential compromise and compliance violations.
+        severity: Mandatory
+        required_context: multi-file
+        software_version: all
+        reference_link: https://www.mongodb.com/docs/manual/reference/connection-string/
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              const client = new MongoClient("mongodb://admin:Sup3rSecret@db:27017/app");
+            compliant: |
+              const client = new MongoClient(process.env.MONGO_URI);
+          # TypeScript examples
+          - non_compliant: |
+              const client: MongoClient = new MongoClient("mongodb://admin:Sup3rSecret@db:27017/app");
+            compliant: |
+              const client: MongoClient = new MongoClient(process.env.MONGO_URI as string);
+          # Python examples
+          - non_compliant: |
+              client = MongoClient("mongodb://admin:Sup3rSecret@db:27017/app")
+            compliant: |
+              import os
+              uri = os.environ["MONGO_URI"]
+              client = MongoClient(uri)
+
+      - title: "TLS/SSL With Certificate Validation Must Be Enabled for All External Connections"
+        description: |
+          Client code must enable TLS and certificate validation for all remote MongoDB connections.
+        impact: |
+          Disabling TLS or certificate checks enables MITM attacks and credential leakage, breaking data-in-transit compliance.
+        severity: High
+        required_context: single-file
+        software_version: all
+        reference_link: https://www.mongodb.com/docs/manual/reference/connection-string-options/
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              const client = new MongoClient("mongodb://db:27017/?tlsAllowInvalidCertificates=true");
+            compliant: |
+              const client = new MongoClient("mongodb://db:27017/?tls=true");
+          # TypeScript examples
+          - non_compliant: |
+              const client: MongoClient = new MongoClient("mongodb://db:27017/?tls=false");
+            compliant: |
+              const client: MongoClient = new MongoClient("mongodb://db:27017/?tls=true");
+          # Python examples
+          - non_compliant: |
+              MongoClient("mongodb://db:27017/?tls=false")
+            compliant: |
+              MongoClient("mongodb://db:27017/?tls=true&tlsCAFile=/etc/ssl/certs/ca.pem")
+
+      - title: "Mask or Redact Sensitive Values in Application Logs"
+        description: |
+          Application logs must not contain unredacted PII and sensitive data.
+        impact: |
+          Logs are long-lived; leaking PII or secrets violates privacy statutes and creates breach risk.
+        severity: High
+        required_context: multi-file
+        software_version: all
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              console.log("New user:", user);
+            compliant: |
+              console.log(`New user created: id=${user._id}, email=${maskEmail(user.email)}`);
+          # TypeScript examples
+          - non_compliant: |
+              import { User } from './models/user'; // Assume a Mongoose or MongoDB User type
+
+              function logUser(user: User) {
+                console.log("User document:", user);
+              }
+            compliant: |
+              import { User } from './models/user';
+
+              function logUser(user: User) {
+                // Assume maskEmail and redactFields are utility functions
+                const safeUser = {
+                  _id: user._id,
+                  email: maskEmail(user.email),
+                  // Only include non-sensitive fields
+                };
+                console.log("User created:", safeUser);
+              }
+          # Python examples
+          - non_compliant: |
+              logging.info("User data: %s", user)
+            compliant: |
+              logging.info("User created: id=%s, email=%s", user["id"], mask_email(user["email"]))
+
+      - title: "Do Not Log or Print Full Connection Strings (Especially with Credentials)"
+        description: |
+          Application code must not log MongoDB URIs containing credentials or internal hostnames.
+        impact: |
+          Logs often persist indefinitely and are aggregated; leaking URIs compromises credentials and network details.
+        severity: High
+        required_context: multi-file
+        software_version: all
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              console.log("MongoDB connection:", process.env.MONGO_URI);
+            compliant: |
+              console.log("Mongo connection established");
+          # TypeScript examples
+          - non_compliant: |
+              console.log("MongoDB connection string:", process.env.MONGO_URI);
+
+              const mongoUri: string = getMongoUri();
+              console.log(`Connecting to: ${mongoUri}`);
+            compliant: |
+              console.log("MongoDB connection established");
+
+              const dbName: string = process.env.MONGO_DBNAME || "unknown";
+              console.log(`Connected to MongoDB database: ${dbName}`);
+          # Python examples
+          - non_compliant: |
+              logging.debug(f"Mongo URI: {os.environ['MONGO_URI']}")
+            compliant: |
+              logging.debug("Mongo connection established")
+
+      - title: "Prohibit Use of `$where` / Server-Side JavaScript in Queries"
+        description: |
+          Application code must not use `$where` or server-side JavaScript execution in MongoDB queries.
+        impact: |
+          Removing eval-like queries reduces injection risk and meets security hardening guidance.
+        severity: High
+        required_context: single-file
+        software_version: all
+        reference_link: https://www.mongodb.com/docs/manual/reference/operator/query/where/
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              db.collection('users').find({ $where: "this.balance > 1000" })
+            compliant: |
+              db.collection('users').find({ balance: { $gt: 1000 } })
+          # TypeScript examples
+          - non_compliant: |
+              db.collection('users').find({ $where: "this.isAdmin === true" });
+
+              const query = { $where: "function() { return this.loginCount > 5; }" };
+              db.collection('accounts').find(query);
+            compliant: |
+              db.collection('users').find({ isAdmin: true });
+
+              const query = { loginCount: { $gt: 5 } };
+              db.collection('accounts').find(query);
+          # Python examples
+          - non_compliant: |
+              coll.find({"$where": "this.age > 18"})
+            compliant: |
+              coll.find({"age": {"$gt": 18}})
+
+  - name: "MongoDB Schema Setups"
+    paths:
+      - '**/migrations/**/*.js'
+      - '**/migrations/**/*.ts'
+      - '**/migrations/**/*.py'
+      - '**/init/**/*.js'
+      - '**/init/**/*.ts'
+      - '**/init/**/*.py'
+      - '**/setup_db*.js'
+      - '**/setup_db*.py'
+
+    policies:
+
+      - title: "Collections Handling Sensitive Data Must Define JSON Schema Validation"
+        description: |
+          Collections that store regulated or business-critical fields must enforce a JSON Schema validator.
+        impact: |
+          Validation ensures data quality, prevents schema drift, and supports downstream analytics, compliance, and migrations.
+        severity: Mandatory
+        required_context: single-file
+        software_version: all
+        reference_link: https://www.mongodb.com/docs/manual/core/schema-validation/specify-json-schema/
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              // Native MongoDB Driver
+              await db.createCollection("users");
+            compliant: |
+              // Native MongoDB Driver
+              await db.createCollection("users", {
+                validator: {
+                  $jsonSchema: {
+                    bsonType: "object",
+                    required: ["email", "createdAt"],
+                    additionalProperties: false,
+                    properties: {
+                      _id: { bsonType: "objectId" },
+                      email: { bsonType: "string", pattern: "^\\S+@\\S+\\.\\S+$" },
+                      createdAt: { bsonType: "date" }
+                    }
+                  }
+                },
+                validationAction: "error",
+                validationLevel: "strict"
+              });
+          # TypeScript examples
+          - non_compliant: |
+              // No schema validation
+              await db.createCollection("customers");
+            compliant: |
+              import { Db } from "mongodb";
+
+              const db: Db = getDb(); // getDb(): your connection utility
+
+              await db.createCollection("customers", {
+                validator: {
+                  $jsonSchema: {
+                    bsonType: "object",
+                    required: ["name", "email", "createdAt"],
+                    additionalProperties: false,
+                    properties: {
+                      _id: { bsonType: "objectId" },
+                      name: { bsonType: "string" },
+                      email: { bsonType: "string", pattern: "^\\S+@\\S+\\.\\S+$" },
+                      createdAt: { bsonType: "date" }
+                    }
+                  }
+                },
+                validationAction: "error",
+                validationLevel: "strict"
+              });
+          # Python examples
+          - non_compliant: |
+              # PyMongo, no validation
+              db.create_collection("payments")
+            compliant: |
+              # PyMongo, JSON Schema validation
+              db.create_collection(
+                "payments",
+                validator={
+                  "$jsonSchema": {
+                    "bsonType": "object",
+                    "required": ["amount", "currency", "createdAt"],
+                    "additionalProperties": False,
+                    "properties": {
+                      "_id": {"bsonType": "objectId"},
+                      "amount": {"bsonType": "decimal"},
+                      "currency": {"bsonType": "string"},
+                      "createdAt": {"bsonType": "date"}
+                    }
+                  }
+                },
+                validationAction="error",
+                validationLevel="strict"
+              )
+
+      - title: "Disallow Unknown Fields Unless Explicitly Needed (`additionalProperties: false`)"
+        description: |
+          JSON Schema validation for collections must set `additionalProperties: false`.
+        impact: |
+          Keeps downstream ETL/reporting reliable and avoids untracked PII creeping into documents.
+        severity: High
+        required_context: single-file
+        software_version: all
+        reference_link: https://www.mongodb.com/docs/manual/core/schema-validation/specify-json-schema/json-schema-tips/
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              await db.createCollection("profiles", {
+                validator: {
+                  $jsonSchema: {
+                    bsonType: "object",
+                    properties: { name: { bsonType: "string" } }
+                  }
+                }
+              });
+              await db.collection("profiles").insertOne({ name: "Alice", unknownField: 123 });
+            compliant: |
+              await db.createCollection("profiles", {
+                validator: {
+                  $jsonSchema: {
+                    bsonType: "object",
+                    required: ["name"],
+                    additionalProperties: false,
+                    properties: { name: { bsonType: "string" } }
+                  }
+                },
+                validationAction: "error",
+                validationLevel: "strict"
+              });
+          # TypeScript example
+          - non_compliant: |
+              // Allows extra fields due to additionalProperties: true
+              import { Db } from "mongodb";
+              const db: Db = getDb();
+              await db.createCollection("orders", {
+                validator: {
+                  $jsonSchema: {
+                    bsonType: "object",
+                    required: ["orderId", "amount"],
+                    additionalProperties: true,
+                    properties: { orderId: { bsonType: "string" }, amount: { bsonType: "decimal" } }
+                  }
+                }
+              });
+              await db.collection("orders").insertOne({ orderId: "123", amount: 100.0, unexpected: "oops" });
+            compliant: |
+              // Properly disallows extra fields
+              import { Db } from "mongodb";
+              const db: Db = getDb();
+              await db.createCollection("orders", {
+                validator: {
+                  $jsonSchema: {
+                    bsonType: "object",
+                    required: ["orderId", "amount"],
+                    additionalProperties: false,
+                    properties: { orderId: { bsonType: "string" }, amount: { bsonType: "decimal" } }
+                  }
+                },
+                validationAction: "error",
+                validationLevel: "strict"
+              });
+          # Python examples
+          - non_compliant: |
+              db.create_collection("profiles", validator={"$jsonSchema": {"bsonType": "object", "properties": {"name": {"bsonType":"string"}}}})
+              db.profiles.insert_one({"name":"Alice","extra":123})
+            compliant: |
+              db.create_collection(
+                "profiles",
+                validator={
+                  "$jsonSchema": {
+                    "bsonType": "object",
+                    "required": ["name"],
+                    "additionalProperties": False,
+                    "properties": { "name": {"bsonType":"string"} }
+                  }
+                },
+                validationAction="error",
+                validationLevel="strict"
+              )
+
+  - name: "MongoDB Data Modeling & Schema Design"
+    paths:
+      - '**/*.js'
+      - '**/*.ts'
+      - '**/*.py'
+
+    policies:
+
+      - title: "Use Decimal128 or Int64 for Monetary Values — Not Double"
+        description: |
+          Monetary values must use Decimal128 (or Int64) in schemas and client code.
+        impact: |
+          Prevents precision errors in financial reports and billing, meeting audit and accounting requirements.
+        severity: High
+        required_context: single-file
+        software_version: all
+        reference_link: https://www.mongodb.com/docs/manual/reference/bson-types/
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              await db.collection("payments").insertOne({ amount: 12.34 });
+            compliant: |
+              await db.collection("payments").insertOne({ amount: NumberDecimal("12.34") });
+          # TypeScript examples
+          - non_compliant: |
+              await db.collection("payments").insertOne({ amount: 12.34 }); // double
+            compliant: |
+              import { Decimal128 } from "mongodb";
+
+              await db.collection("payments").insertOne({ amount: Decimal128.fromString("12.34") });
+          # Python examples
+          - non_compliant: |
+              db.payments.insert_one({"amount": 12.34})  # double
+            compliant: |
+              from bson.decimal128 import Decimal128
+              db.payments.insert_one({"amount": Decimal128("12.34")})
+
+      - title: "Embed for One-to-Few / Reference for Unbounded Growth"
+        description: |
+          Embed subdocuments when the child set is small and frequently read with the parent; use referencing for unbounded or frequently updated arrays.
+        impact: |
+          Prevents oversized documents, large array rewrites, and performance degradation due to the 16MB document limit.
+        severity: Mandatory
+        required_context: single-file
+        software_version: all
+        reference_link: https://www.mongodb.com/docs/manual/data-modeling/concepts/embedding-vs-references/
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              // Violates: Embeds a large array of posts directly
+              const largePostsArray = Array.from({length: 20000}, (_, i) => ({ text: `Post #${i + 1}` }));
+              db.users.insertOne({ name: "Bob", posts: largePostsArray });
+            compliant: |
+              // Compliant: Uses references for large/unbounded post arrays
+              const userId = new ObjectId();
+              db.users.insertOne({ _id: userId, name: "Bob" });
+              const posts = [
+                { userId, text: "Post #1" },
+                { userId, text: "Post #2" },
+                // ...additional posts as needed
+              ];
+              db.posts.insertMany(posts);
+          # TypeScript examples
+          - non_compliant: |
+              // Violates: Embeds a large array of posts directly
+              const largePostsArray: { text: string }[] = Array.from({length: 15000}, (_, i) => ({ text: `Post #${i + 1}` }));
+              await db.collection("users").insertOne({
+                name: "Bob",
+                posts: largePostsArray
+              });
+            compliant: |
+              // Compliant: Uses references for large/unbounded post arrays
+              import { ObjectId } from "mongodb";
+
+              const userId = new ObjectId();
+              await db.collection("users").insertOne({ _id: userId, name: "Bob" });
+              await db.collection("posts").insertMany([
+                { userId, text: "First post" },
+                { userId, text: "Second post" },
+                // ...more posts as needed
+              ]);
+          # Python examples
+          - non_compliant: |
+              # Violates: Embeds a large array of events directly
+              events_large_array = [{"type": "click"} for _ in range(18000)]
+              user = {"name": "Bob", "events": events_large_array}
+              db.users.insert_one(user)
+            compliant: |
+              # Compliant: Uses references for large/unbounded event arrays
+              from bson import ObjectId
+
+              user_id = ObjectId()
+              db.users.insert_one({"_id": user_id, "name": "Bob"})
+              events = [
+                  {"userId": user_id, "type": "click"},
+                  {"userId": user_id, "type": "view"},
+                  # ...more events as needed
+              ]
+              db.events.insert_many(events)
+
+      - title: "Array Size and Document Growth Must Be Capped or Bucketed"
+        description: |
+          In JavaScript, TypeScript, or Python application code that interacts with MongoDB, arrays that grow without bound must use patterns like bucketing or separate collections with references.
+        impact: |
+          Prevents hitting 16MB limit, excessive update costs, and poor query performance.
+        severity: High
+        required_context: single-file
+        software_version: all
+        reference_link: https://www.mongodb.com/docs/manual/data-modeling/design-patterns/group-data/bucket-pattern/
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              db.accounts.updateOne({ _id: id }, { $push: { logs: newLogEntry } })
+            compliant: |
+              const bucketId = `${id}-${new Date().toISOString().slice(0,10)}`;
+              db.account_logs.updateOne(
+                { _id: bucketId },
+                { $push: { entries: newLogEntry } },
+                { upsert: true }
+              );
+          # TypeScript examples
+          - non_compliant: |
+              await db.collection("accounts").updateOne(
+                { _id: id },
+                { $push: { logs: newLogEntry } }
+              );
+            compliant: |
+              const bucketId = `${id}-${new Date().toISOString().slice(0, 10)}`;
+              await db.collection("account_logs").updateOne(
+                { _id: bucketId },
+                { $push: { entries: newLogEntry } },
+                { upsert: true }
+              );
+          # Python examples
+          - non_compliant: |
+              db.users.update_one({"_id": id}, {"$push": {"events": event}})
+            compliant: |
+              bucket_id = f"{id}-{date.today()}"
+              db.user_events.update_one({"_id": bucket_id}, {"$push": {"entries": event}}, upsert=True)
+
+      - title: "Multi-Tenant Documents Must Include tenantId"
+        description: |
+          Each document in a multi-tenant app must include a tenantId field.
+        impact: |
+          Ensures tenant isolation and enables query filtering by tenant.
+        severity: Mandatory
+        required_context: single-file
+        software_version: all
+        reference_link: https://www.mongodb.com/docs/atlas/build-multi-tenant-arch/
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              db.users.insertOne({ name: "Alice" }); // missing tenantId
+            compliant: |
+              db.users.insertOne({ name: "Alice", tenantId });
+          # TypeScript examples
+          - non_compliant: |
+              await db.collection("orders").insertOne({ item: "Book" }); // missing tenantId
+            compliant: |
+              await db.collection("orders").insertOne({ item: "Book", tenantId });
+          # Python examples
+          - non_compliant: |
+              db.customers.insert_one({"name": "Bob"})
+            compliant: |
+              db.customers.insert_one({"name": "Bob", "tenantId": tenant_id})
+
+      - title: "Queries in Multi-Tenant Apps Must Filter By tenantId"
+        description: |
+          All queries in a multi-tenant app must include tenantId in the filter.
+        impact: |
+          Prevents accidental data leakage between tenants.
+        severity: Mandatory
+        required_context: single-file
+        software_version: all
+        reference_link: https://www.mongodb.com/docs/atlas/build-multi-tenant-arch/
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              await db.users.findOne({ _id: userId }); // missing tenantId
+              await db.users.updateOne({ _id: userId }, { $set: { email: "a@b.c" } }); // missing tenantId
+            compliant: |
+              await db.users.findOne({ _id: userId, tenantId });
+              await db.users.updateOne({ _id: userId, tenantId }, { $set: { email: "a@b.c" } });
+          # TypeScript examples
+          - non_compliant: |
+              await db.collection("orders").find({ status: "shipped" }).toArray(); // missing tenantId
+              await db.collection("orders").updateOne({ _id: orderId }, { $set: { status: "shipped" } }); // missing tenantId
+            compliant: |
+              await db.collection("orders").find({ status: "shipped", tenantId }).toArray();
+              await db.collection("orders").updateOne({ _id: orderId, tenantId }, { $set: { status: "shipped" } });
+          # Python examples
+          - non_compliant: |
+              db.orders.find_one({"_id": id})  # missing tenantId
+              db.orders.update_one({"_id": id}, {"$set": {"status": "shipped"}})  # missing tenantId
+            compliant: |
+              db.orders.find_one({"_id": id, "tenantId": tenant_id})
+              db.orders.update_one({"_id": id, "tenantId": tenant_id}, {"$set": {"status": "shipped"}})
+
+      - title: "Unique Indexes in Multi-Tenant Collections Must Include tenantId"
+        description: |
+          Unique indexes in multi-tenant collections must include tenantId to avoid cross-tenant uniqueness conflicts.
+        impact: |
+          Prevents one tenant's data from blocking another's unique value, and reinforces isolation.
+        severity: High
+        required_context: single-file
+        software_version: all
+        reference_link: https://www.mongodb.com/docs/manual/core/index-unique/
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              await db.users.createIndex({ email: 1 }, { unique: true });
+            compliant: |
+              await db.users.createIndex({ tenantId: 1, email: 1 }, { unique: true });
+          # TypeScript examples
+          - non_compliant: |
+              await db.collection("users").createIndex({ email: 1 }, { unique: true });
+            compliant: |
+              await db.collection("users").createIndex({ tenantId: 1, email: 1 }, { unique: true });
+          # Python examples
+          - non_compliant: |
+              db.accounts.create_index([("name", 1)], unique=True)
+            compliant: |
+              db.accounts.create_index([("tenantId", 1), ("name", 1)], unique=True)
+
+      - title: "Use Discriminator or Type Fields for Heterogeneous Documents"
+        description: |
+          Collections that intentionally store multiple shapes (subtypes) must include a discriminator or type field and validate each subtype.
+        impact: |
+          Maintains clarity, enables consistent deserialization, and avoids silent shape drift.
+        severity: High
+        required_context: single-file
+        software_version: all
+        reference_link: https://www.mongodb.com/docs/manual/core/schema-validation/specify-json-schema/
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              // setupDatabase.js - Collection without discriminator validation
+              await db.createCollection("activities", {
+                validator: {
+                  $jsonSchema: {
+                    bsonType: "object",
+                    properties: {
+                      action: { bsonType: "string" },
+                      score: { bsonType: "number" }
+                    }
+                  }
+                }
+              });
+              // Different document shapes without type field
+              await db.activities.insertOne({ action: "login", ts: new Date() });
+              await db.activities.insertOne({ score: 10, level: 2 });
+            compliant: |
+              // setupDatabase.js - Collection with discriminator validation
+              await db.createCollection("activities", {
+                validator: {
+                  $jsonSchema: {
+                    oneOf: [
+                      { bsonType: "object", required: ["type","action","ts"], properties: { type: { enum: ["login"] } } },
+                      { bsonType: "object", required: ["type","score","level"], properties: { type: { enum: ["gameScore"] } } }
+                    ]
+                  }
+                }
+              });
+              await db.activities.insertOne({ type: "login", action: "login", ts: new Date() });
+          # Python examples
+          - non_compliant: |
+              # database_setup.py - Collection without discriminator validation
+              schema = {
+                "$jsonSchema": {
+                  "bsonType": "object",
+                  "properties": {
+                    "clicks": {"bsonType": "number"},
+                    "error": {"bsonType": "string"}
+                  }
+                }
+              }
+              db.create_collection("events", validator=schema)
+              # Different document shapes without type field
+              db.events.insert_one({"clicks": 4})
+              db.events.insert_one({"error": "timeout"})
+            compliant: |
+              # database_setup.py - Collection with discriminator validation
+              schema = {
+                "$jsonSchema": {
+                  "oneOf": [
+                    {"required": ["type","clicks"], "properties": {"type": {"enum":["analytics"]}}},
+                    {"required": ["type","error"], "properties": {"type": {"enum":["errorLog"]}}}
+                  ]
+                }
+              }
+              db.create_collection("events", validator=schema)
+              db.events.insert_one({"type":"analytics","clicks":4})
+          # TypeScript examples
+          - non_compliant: |
+              // models.ts - Interface without discriminator
+              interface Activity {
+                action?: string;
+                score?: number;
+              }
+              
+              // Usage without type discrimination
+              const activities: Activity[] = [
+                { action: "login" },
+                { score: 100 }
+              ];
+            compliant: |
+              // models.ts - Interface with discriminator
+              interface LoginActivity {
+                type: "login";
+                action: string;
+                timestamp: Date;
+              }
+              
+              interface GameActivity {
+                type: "gameScore";
+                score: number;
+                level: number;
+              }
+              
+              type Activity = LoginActivity | GameActivity;
+              
+              const activities: Activity[] = [
+                { type: "login", action: "userLogin", timestamp: new Date() },
+                { type: "gameScore", score: 100, level: 5 }
+              ];
+
+      - title: "Critical Identifier Fields Must Be Immutable After Insert"
+        description: |
+          Critical identifier fields such as `_id`, `tenantId`, and `accountId` must be set on insert and not updated.
+        impact: |
+          Ensures referential integrity, auditability, and prevents cross-tenant switching or record spoofing.
+        severity: Mandatory
+        required_context: single-file
+        software_version: all
+        reference_link:
+          - https://www.mongodb.com/docs/manual/core/document/#the-_id-field
+          - https://www.mongodb.com/docs/manual/core/schema-validation/
+          - https://mongoose.com/docs/api/schematype.html#SchemaType.prototype.immutable()
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              await db.users.updateOne({ _id }, { $set: { tenantId: "otherTenant" } });
+            compliant: |
+              await db.users.updateOne({ _id, tenantId }, { $set: { name: "Robert" } });
+          # TypeScript examples
+          - non_compliant: |
+              await db.collection("users").updateOne(
+                { _id },
+                { $set: { tenantId: "otherTenant" } }
+              );
+
+              await db.collection("accounts").updateOne(
+                { _id },
+                { $set: { accountId: "newId" } }
+              );
+            compliant: |
+              await db.collection("users").updateOne(
+                { _id, tenantId },
+                { $set: { name: "Robert" } }
+              );
+
+              await db.collection("accounts").updateOne(
+                { _id, accountId },
+                { $set: { status: "active" } }
+              );
+          # Python examples
+          - non_compliant: |
+              db.accounts.update_one({"_id": id}, {"$set": {"accountId": "newId"}})
+            compliant: |
+              db.accounts.update_one({"_id": id, "accountId": acct_id}, {"$set": {"status": "active"}})
+
+  - name: "MongoDB Indexing & Query Optimization"
+    paths:
+      - '**/*.js'
+      - '**/*.ts'
+      - '**/*.py'
+
+    policies:
+
+      - title: "Compound Indexes: Follow the ESR (Equality-Sort-Range) Ordering"
+        description: |
+          Compound indexes must use the Equality → Sort → Range ordering.
+        impact: |
+          Proper ordering improves index selectivity and enables index use for filtering and sorting, enhancing performance.
+        severity: Mandatory
+        required_context: single-file
+        software_version: all
+        reference_link:
+          - https://www.mongodb.com/docs/manual/tutorial/equality-sort-range-guideline/
+          - https://www.mongodb.com/docs/manual/core/index-compound/
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              // Sort field before equality field (violates ESR)
+              await db.accounts.createIndex({ createdAt: 1, email: 1 });
+              await db.accounts.find({ email: "user@example.com" }).sort({ createdAt: -1 });
+            compliant: |
+              // Equality field before sort field (follows ESR)
+              await db.accounts.createIndex({ email: 1, createdAt: -1 });
+              await db.accounts.find({ email: "user@example.com" }).sort({ createdAt: -1 });
+          # TypeScript examples
+          - non_compliant: |
+              // Range field before sort field (violates ESR)
+              await db.orders.createIndex({ price: 1, createdAt: 1 });
+              await db.orders.find({ price: { $gt: 100 } }).sort({ createdAt: 1 });
+            compliant: |
+              // Sort field before range field (follows ESR)
+              await db.orders.createIndex({ createdAt: 1, price: 1 });
+              await db.orders.find({ price: { $gt: 100 } }).sort({ createdAt: 1 });
+          # JavaScript (Mongoose) examples
+          - non_compliant: |
+              // Range field before equality field (violates ESR)
+              orderSchema.index({ amount: 1, status: 1 });
+              // Query: equality on status, range on amount
+              await Order.find({ status: "active", amount: { $gt: 100 } });
+            compliant: |
+              // Equality field before range field (follows ESR)
+              orderSchema.index({ status: 1, amount: 1 });
+              // Query: equality on status, range on amount
+              await Order.find({ status: "active", amount: { $gt: 100 } });
+          # Python examples
+          - non_compliant: |
+              # Range field before equality field (violates ESR)
+              db.products.create_index([("price", 1), ("category", 1)])
+              db.products.find({"category": "electronics", "price": {"$gt": 50}})
+            compliant: |
+              # Equality field before range field (follows ESR)
+              db.products.create_index([("category", 1), ("price", 1)])
+              db.products.find({"category": "electronics", "price": {"$gt": 50}})
+
+      - title: "Low-cardinality fields must not be indexed alone"
+        description: |
+          Single fields with very few distinct values must not be indexed in isolation.
+        impact: |
+          Avoids poor index performance and wasted storage, helping the query planner avoid inefficient scans.
+        severity: High
+        required_context: single-file
+        software_version: all
+        reference_link:
+          - https://www.mongodb.com/docs/manual/core/index-compound/
+          - https://www.mongodb.com/company/blog/performance-best-practices-indexing
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              await db.logs.createIndex({ isActive: 1 });
+            compliant: |
+              await db.logs.createIndex({ isActive: 1, updatedAt: -1 });
+          # Typescript examples
+          - non_compliant: |
+              await db.collection("logs").createIndex({ isActive: 1 });
+            compliant: |
+              await db.collection("logs").createIndex({ isActive: 1, updatedAt: -1 });
+          # JavaScript (Mongoose) examples
+          - non_compliant: |
+              // Mongoose
+              logSchema.index({ archived: 1 });
+            compliant: |
+              // Mongoose
+              logSchema.index({ archived: 1, updatedAt: -1 });
+          # Python examples
+          - non_compliant: |
+              db.logs.create_index([("isActive", 1)])
+            compliant: |
+              db.logs.create_index([("isActive", 1), ("updatedAt", -1)])
+
+      - title: "Use Partial or Sparse Indexes for Optional or Sparse Fields"
+        description: |
+          Indexes for fields present only in some documents must be partial or sparse.
+        impact: |
+          Indexes stay small and efficient, reducing write overhead and improving query planner accuracy on selective filters.
+        severity: Mandatory
+        required_context: single-file
+        software_version: all
+        reference_link:
+          - https://www.mongodb.com/docs/manual/core/index-partial/
+          - https://www.mongodb.com/docs/manual/core/index-sparse/
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              await db.emp.createIndex({ department: 1 });
+            compliant: |
+              await db.emp.createIndex({ department: 1 }, { sparse: true });
+              await db.emp.createIndex({ department: 1 }, { partialFilterExpression: { department: { $exists: true } } });
+          # JavaScript (Mongoose) examples
+          - non_compliant: |
+              // Mongoose
+              empSchema.index({ department: 1 });
+            compliant: |
+              // Mongoose
+              empSchema.index({ department: 1 }, { sparse: true });
+          # TypeScript examples
+          - non_compliant: |
+              await db.collection("emp").createIndex({ department: 1 });
+            compliant: |
+              await db.collection("emp").createIndex({ department: 1 }, { sparse: true });
+              await db.collection("emp").createIndex(
+                { department: 1 },
+                { partialFilterExpression: { department: { $exists: true } } }
+              );
+
+          # TypeScript (Mongoose) examples
+          - non_compliant: |
+              empSchema.index({ department: 1 });
+            compliant: |
+              empSchema.index({ department: 1 }, { sparse: true });
+          # Python examples
+          - non_compliant: |
+              db.employees.create_index([("role", 1)])
+            compliant: |
+              db.employees.create_index([("role", 1)], sparse=True)
+              db.employees.create_index([("role", 1)], partialFilterExpression={"role": {"$exists": True}})
+
+      - title: "Text Index Creation Must Specify default_language and Weights"
+        description: |
+          When creating text indexes, the operation must include a `default_language` option and a `weights` document.
+        impact: |
+          • Guarantees text search uses the intended language rules (stemming, stop words, etc.).  
+          • Enables fine-grained control over field relevance, improving result accuracy and performance.
+        severity: Mandatory
+        required_context: single-file
+        software_version: all
+        reference_link: https://www.mongodb.com/docs/manual/core/indexes/index-types/index-text
+        code_examples:
+          # JavaScript Examples
+          - non_compliant: |
+              // Missing default_language & weights
+              await db.posts.createIndex({ headline: "text", content: "text" });
+            compliant: |
+              // Includes both default_language and custom weights
+              await db.posts.createIndex(
+                { headline: "text", content: "text" },
+                { default_language: "english", weights: { headline: 8, content: 3 } }
+              );
+          # JavaScript (Mongoose) Examples
+          - non_compliant: |
+              // Only default_language, no weights
+              articleSchema.index(
+                { summary: "text", comments: "text" },
+                { default_language: "english" }
+              );
+            compliant: |
+              // Specifies both default_language and weights
+              articleSchema.index(
+                { summary: "text", comments: "text" },
+                { default_language: "english", weights: { summary: 5, comments: 1 } }
+              );
+          # TypeScript Examples
+          - non_compliant: |
+              // Omits both default_language & weights
+              await db.collection("reviews").createIndex({ title: "text", body: "text" });
+            compliant: |
+              // Defines language and weights
+              await db.collection("reviews").createIndex(
+                { title: "text", body: "text" },
+                { default_language: "english", weights: { title: 7, body: 2 } }
+              );
+          # TypeScript (Mongoose) Examples
+          - non_compliant: |
+              // Missing weights map
+              interface Comment extends Document {
+                text: string;
+                author: string;
+              }
+              commentSchema.index(
+                { text: "text", author: "text" },
+                { default_language: "english" }
+              );
+            compliant: |
+              // Includes both default_language and weights
+              commentSchema.index(
+                { text: "text", author: "text" },
+                { default_language: "english", weights: { text: 4, author: 1 } }
+              );
+          # Python examples
+          - non_compliant: |
+              # Missing weights map
+              db.articles.create_index(
+                [("title", "text"), ("body", "text")],
+                default_language="english"
+              )
+            compliant: |
+              # With default_language and weights
+              db.articles.create_index(
+                [("title", "text"), ("body", "text")],
+                default_language="english",
+                weights={"title": 5, "body": 1}
+              )
+
+      - title: "Avoid Redundant Index Creation"
+        description: |
+          Do not create a single-field index in a file if a compound index that starts with the same field is already defined in the same file.
+        impact: |
+          Reduces index maintenance cost and improves write throughput and query planner clarity.
+        severity: High
+        required_context: single-file
+        software_version: all
+        reference_link:
+          - https://www.mongodb.com/docs/manual/data-modeling/design-antipatterns/unnecessary-indexes/
+          - https://www.mongodb.com/docs/atlas/analyze-slow-queries/
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              await db.orders.createIndex({ status: 1 });
+              await db.orders.createIndex({ status: 1, createdAt: -1 });
+            compliant: |
+              await db.orders.createIndex({ status: 1, createdAt: -1 });
+          # JavaScript (Mongoose) examples
+          - non_compliant: |
+              // Mongoose
+              orderSchema.index({ status: 1 });
+              orderSchema.index({ status: 1, createdAt: -1 });
+            compliant: |
+              // Mongoose
+              orderSchema.index({ status: 1, createdAt: -1 });
+          # Python examples
+          - non_compliant: |
+              db.orders.create_index([("status", 1)])
+              db.orders.create_index([("status", 1), ("createdAt", -1)])
+            compliant: |
+              db.orders.create_index([("status", 1), ("createdAt", -1)])
+
+      - title: "Exclude _id from projections when not needed"
+        description: |
+          When using projections in database queries, exclude _id field if it's not needed by specifying _id: 0.
+        impact: |
+          Improves query performance by reducing data transfer and memory usage, and enables covered queries when combined with appropriate indexes.
+        severity: High
+        required_context: single-file
+        software_version: all
+        reference_link: 
+          - https://www.mongodb.com/docs/manual/core/query-optimization/
+          - https://www.mongodb.com/docs/manual/data-modeling/schema-design-process/create-indexes/#covered-queries
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              const docs = await db.inventory.find({ type: "food" }, { item: 1 });
+            compliant: |
+              const docs = await db.inventory.find({ type: "food" }, { item: 1, _id: 0 });
+          # TypeScript examples
+          - non_compliant: |
+              const orders = await db.collection("orders").find({ status: "active" }, { total: 1 }).toArray();
+            compliant: |
+              const orders = await db.collection("orders").find({ status: "active" }, { total: 1, _id: 0 }).toArray();
+          # TypeScript (Mongoose) examples
+          - non_compliant: |
+              const users = await User.find({ active: true }, { name: 1, email: 1 });
+            compliant: |
+              const users = await User.find({ active: true }, { name: 1, email: 1, _id: 0 });
+          # Python examples
+          - non_compliant: |
+              docs = list(db.inventory.find({"type": "food"}, {"item": 1}))
+            compliant: |
+              docs = list(db.inventory.find({"type": "food"}, {"item": 1, "_id": 0}))
+
+      - title: "Use Range-Based Pagination Instead of skip() for Large Offsets"
+        description: |
+          For large result sets, use range queries for pagination instead of skip-limit.
+        impact: |
+          Dramatically improves performance for deep pagination, especially on large collections.
+        severity: Mandatory
+        required_context: single-file
+        software_version: all
+        reference_link: https://medium.com/mongodb/mongodb-pagination-offset-based-vs-keyset-vs-pre-generated-result-pages-4177e05d88ec
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              await db.users.find().sort({_id:1}).skip(5000).limit(20);
+            compliant: |
+              await db.users.find({_id: {$gt: lastSeenId}}).sort({_id:1}).limit(20);
+          # TypeScript examples
+          - non_compliant: |
+              await db.collection("users").find().sort({ _id: 1 }).skip(5000).limit(20);
+            compliant: |
+              await db.collection("users").find({ _id: { $gt: lastSeenId } }).sort({ _id: 1 }).limit(20);
+          # Python examples
+          - non_compliant: |
+              db.users.find().sort("_id", 1).skip(10000).limit(50)
+            compliant: |
+              db.users.find({"_id": {"$gt": last_seen_id}}).sort("_id", 1).limit(50)
+
+      - title: "Optimize Aggregation Pipelines: Match and Sort Early, Project Late"
+        description: |
+          In aggregation pipelines, `$match` and `$sort` must be placed before `$group` or `$project` stages where possible.
+        impact: |
+          Improves pipeline efficiency, enables index use, and reduces resource usage.
+        severity: Mandatory
+        required_context: single-file
+        software_version: all
+        reference_link: https://www.mongodb.com/docs/manual/core/aggregation-pipeline-optimization/
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              const result = await db.logs.aggregate([
+                { $project: { userId: 1, events: 1 } },
+                { $match: { events: { $exists: true } } },
+                { $group: { _id: "$userId", count: { $sum: 1 } } }
+              ]).toArray();
+            compliant: |
+              const result = await db.logs.aggregate([
+                { $match: { events: { $exists: true } } },
+                { $group: { _id: "$userId", count: { $sum: 1 } } },
+                { $project: { _id: 1, count: 1 } }
+              ]).toArray();
+          # TypeScript examples
+          - non_compliant: |
+              const result = await db.collection("logs").aggregate([
+                { $project: { userId: 1, events: 1 } },
+                { $match: { events: { $exists: true } } },
+                { $group: { _id: "$userId", count: { $sum: 1 } } }
+              ]).toArray();
+            compliant: |
+              const result = await db.collection("logs").aggregate([
+                { $match: { events: { $exists: true } } },
+                { $group: { _id: "$userId", count: { $sum: 1 } } },
+                { $project: { _id: 1, count: 1 } }
+              ]).toArray();
+          # Python examples
+          - non_compliant: |
+              res = list(db.events.aggregate([
+                {"$project": {"type":1, "timestamp":1}},
+                {"$match": {"timestamp": {"$gte": some_date}}},
+                {"$sort": {"timestamp": -1}}
+              ]))
+            compliant: |
+              res = list(db.events.aggregate([
+                {"$match": {"timestamp": {"$gte": some_date}}},
+                {"$sort": {"timestamp": -1}},
+                {"$project": {"type":1, "timestamp":1}}
+              ]))
+
+      - title: "Avoid Regex Queries Without Index Prefix"
+        description: |
+          Regex queries that do not start with a fixed prefix must not be run on indexed fields.
+        impact: |
+          Prevents expensive full collection scans and poor performance on large collections.
+        severity: High
+        required_context: single-file
+        software_version: all
+        reference_link: https://www.mongodb.com/docs/manual/reference/operator/query/regex/
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              await db.users.find({ email: /gmail\.com$/ }); // No fixed prefix
+            compliant: |
+              // email field is indexed
+              await db.users.find({ email: /^user\d+@gmail\.com$/ }); // Regex starts with fixed prefix
+          # TypeScript examples
+          - non_compliant: |
+              // email field is indexed
+              await db.collection("users").find({ email: /gmail\.com$/ }); // No fixed prefix
+            compliant: |
+              // email field is indexed
+              await db.collection("users").find({ email: /^user\d+@gmail\.com$/ }); // Regex starts with fixed prefix
+          # Python examples
+          - non_compliant: |
+              db.users.find({"username": {"$regex": "admin$"}})  # No fixed prefix
+            compliant: |
+              # username field is indexed
+              db.users.find({"username": {"$regex": "^admin"}})  # Regex starts with fixed prefix
+
+      - title: "Avoid Multiple Single-Field Indexes in One File"
+        description: |
+          Do not create multiple single-field indexes for the same collection within a single file when a single compound index covers those fields.
+        impact: |
+          Too many indexes slow writes, increase memory usage, and complicate query planner choices.
+        severity: High
+        required_context: single-file
+        software_version: all
+        reference_link:
+          - https://www.mongodb.com/docs/manual/reference/limits/#indexes
+          - https://www.mongodb.com/company/blog/performance-best-practices-indexing
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              await db.orders.createIndex({ field1: 1 });
+              await db.orders.createIndex({ field2: 1 });
+              await db.orders.createIndex({ field3: 1 });
+              await db.orders.createIndex({ field4: 1 });
+              await db.orders.createIndex({ field5: 1 });
+            compliant: |
+              await db.orders.createIndex({ field1: 1, field2: 1, field3: 1, field4: 1, field5: 1 });
+          # TypeScript examples
+          - non_compliant: |
+              await db.collection("orders").createIndex({ field1: 1 });
+              await db.collection("orders").createIndex({ field2: 1 });
+              await db.collection("orders").createIndex({ field3: 1 });
+              await db.collection("orders").createIndex({ field4: 1 });
+              await db.collection("orders").createIndex({ field5: 1 });
+            compliant: |
+              await db.collection("orders").createIndex({ field1: 1, field2: 1, field3: 1, field4: 1, field5: 1 });
+          # Python examples
+          - non_compliant: |
+              db.users.create_index([("a", 1)])
+              db.users.create_index([("b", 1)])
+              db.users.create_index([("c", 1)])
+              db.users.create_index([("d", 1)])
+              db.users.create_index([("e", 1)])
+            compliant: |
+              db.users.create_index([("a", 1), ("b", 1), ("c", 1), ("d", 1), ("e", 1)])
+
+  - name: "MongoDB Point-In-Time Recovery & Archival Policies"
+    paths:
+      - '**/*.js'
+      - '**/*.ts'
+      - '**/*.py'
+
+    policies:
+
+      - title: "mongodump Commands Must Include --oplog Flag"
+        description: |
+          Any invocation of mongodump in code must include the --oplog flag.
+        impact: |
+          Ensures ability to restore up to specific timestamp, minimizing data loss.
+        severity: Mandatory
+        required_context: single-file
+        software_version: all
+        reference_link: https://www.mongodb.com/docs/manual/core/backups/#point-in-time-recovery
+        code_examples:
+          # Python examples
+          - non_compliant: |
+              os.system("mongodump --uri=$URI --out=/backups/latest")
+            compliant: |
+              os.system("mongodump --uri=$URI --out=/backups/latest --oplog")
+          # JavaScript examples
+          - non_compliant: |
+              exec("mongodump --uri=" + uri)
+            compliant: |
+              exec("mongodump --uri=" + uri + " --oplog")
+          # TypeScript examples
+          - non_compliant: |
+              import { exec } from "child_process";
+              exec(`mongodump --uri=${uri}`);
+            compliant: |
+              import { exec } from "child_process";
+              exec(`mongodump --uri=${uri} --oplog`);
+
+      - title: "Backup Functions Must Include Retention Parameters"
+        description: |
+          Application code calling backup functions must include retention parameters.
+        impact: |
+          Prevents uncontrolled backup accumulation, ensures compliance with RTO/RPO and audits.
+        severity: High
+        required_context: single-file
+        software_version: all
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              // Missing retention rule entirely
+              createBackupSchedule({ frequency: "daily" });
+            compliant: |
+              createBackupSchedule({
+                frequency: "hourly",
+                retentionDays: 365,
+                archiveDays: 30,
+                storageTier: "cold"
+              });
+          # TypeScript examples
+          - non_compliant: |
+              // Has retention but missing archival policy
+              createBackupSchedule({ 
+                frequency: "daily",
+                retentionDays: 90
+              });
+            compliant: |
+              createBackupSchedule({
+                frequency: "hourly",
+                retentionDays: 365,
+                archiveAfterDays: 30,
+                archiveTier: "cold"
+              });
+          # Python examples
+          - non_compliant: |
+              # Only frequency specified, no cleanup policies
+              schedule_backup(freq="daily")
+            compliant: |
+              schedule_backup(freq="hourly", retention_days=365, archive_after_days=30, archive_tier="GLACIER")
+
+  - name: "MongoDB Backups"
+    paths:
+      - '**/*.tf'
+
+    policies:
+
+      - title: "MongoDB Backup Storage Must Enable Server-Side Encryption"
+        description: |
+          Terraform configurations for MongoDB backup storage must enable server-side encryption at rest.
+        impact: |
+          Protects sensitive backup data from unauthorized access and ensures compliance with data protection requirements.
+        severity: Mandatory
+        required_context: single-file
+        software_version: all
+        reference_link: 
+          - https://www.mongodb.com/docs/atlas/backup/cloud-backup/cloud-backup-encryption/
+          - https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_server_side_encryption_configuration
+        code_examples:
+          # Terraform examples
+          - non_compliant: |
+              resource "aws_s3_bucket" "mongo_backups_basic" {
+                bucket = "mongo-backups-basic"
+                # No encryption configured
+              }
+            compliant: |
+              resource "aws_s3_bucket" "mongo_backups" {
+                bucket = "mongo-backups"
+              }
+
+              resource "aws_s3_bucket_server_side_encryption_configuration" "mongo_backups" {
+                bucket = aws_s3_bucket.mongo_backups.id
+                rule {
+                  apply_server_side_encryption_by_default {
+                    sse_algorithm = "AES256"
+                  }
+                }
+              }
+
+  - name: "MongoDB Performance Tuning, Capacity Planning & Cost Optimization on Applications"
+    paths:
+      - '**/*.js'
+      - '**/*.ts'
+      - '**/*.py'
+    policies:
+
+      - title: "Tune Connection Pool Settings in Application Config"
+        description: |
+          Application code must set connection pool parameters such as `maxPoolSize`.
+        impact: |
+          Prevents connection storms, avoids wasted resources, and ensures application stability under load.
+        severity: High
+        required_context: single-file
+        software_version: all
+        reference_link: https://www.mongodb.com/docs/manual/reference/connection-string-options/#mongodb-urioption-maxPoolSize
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              MongoClient.connect(uri)
+            compliant: |
+              MongoClient.connect(uri, { maxPoolSize: 50, minPoolSize: 5 })
+          # TypeScript examples
+          - non_compliant: |
+              import { MongoClient } from "mongodb";
+              await MongoClient.connect(uri);
+            compliant: |
+              import { MongoClient } from "mongodb";
+              await MongoClient.connect(uri, { maxPoolSize: 50, minPoolSize: 5 });
+          # Python examples
+          - non_compliant: |
+              MongoClient(os.getenv('MONGO_URI'))
+            compliant: |
+              MongoClient(os.getenv('MONGO_URI'), maxPoolSize=100, minPoolSize=10)
+
+      - title: "Require Use of Cache When Present for User Record Queries"
+        description: |
+          Where application code includes a caching mechanism, queries for user records must use the cache before querying the database.
+        impact: |
+          Reduces load and cost on MongoDB, improves latency.
+        severity: High
+        required_context: single-file
+        software_version: all
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              const user = await db.users.findOne({ _id: userId });
+            compliant: |
+              // Attempt to retrieve from cache
+              let user = await cache.get(userId);
+              if (!user) {
+                // Cache miss: fetch from database
+                user = await db.users.findOne({ _id: userId });
+                // Store result in cache for next time
+                await cache.set(userId, user);
+              }
+          # TypeScript examples
+          - non_compliant: |
+              const user = await db.collection("users").findOne({ _id: userId });
+            compliant: |
+              // Attempt to retrieve from cache
+              let user = await cache.get(userId);
+              if (!user) {
+                // Cache miss: fetch from database
+                user = await db.collection("users").findOne({ _id: userId });
+                // Store result in cache
+                await cache.set(userId, user);
+              }
+          # Python examples
+          - non_compliant: |
+              user = db.users.find_one({"_id": user_id})
+            compliant: |
+              # Try to retrieve from cache first
+              user = cache.get(user_id)
+              if not user:
+                  # Cache miss: fetch from database
+                  user = db.users.find_one({"_id": user_id})
+                  # Store in cache for next time
+                  cache.set(user_id, user)
+
+  - name: "MongoDB Performance Tuning, Capacity Planning & Cost Optimization on Configurations"
+    paths:
+      - '**/*.yaml'
+      - '**/*.yml'
+
+    policies:
+
+      - title: "Enable Atlas Auto-Scaling in Cluster Config"
+        description: |
+          Cluster configuration must enable Atlas auto-scaling with explicit min/max settings.
+        impact: |
+          Enables automatic cost optimization and avoids wasted idle capacity.
+        severity: Mandatory
+        required_context: single-file
+        software_version: all
+        reference_link: 
+          - https://www.mongodb.com/docs/atlas/cluster-autoscaling/
+          - https://registry.terraform.io/providers/mongodb/mongodbatlas/latest/docs/resources/advanced_cluster#compute_min_instance_size
+        code_examples:
+          # YAML examples
+          - non_compliant: |
+              atlasCluster:
+                autoScaling: {}
+            compliant: |
+              atlasCluster:
+                autoScaling:
+                  compute:
+                    enabled: true
+                    minInstanceSize: M10
+                    maxInstanceSize: M40
+                  storage:
+                    enabled: true
+
+  - name: "MongoDB Monitoring, Observability & Alerting on Applications"
+    paths:
+      - '**/*.js'
+      - '**/*.ts'
+      - '**/*.py'
+
+    policies:
+
+      - title: "Instrument and Export Internal DB Metrics to Observability Platforms"
+        description: |
+          Source files importing a Prometheus client or MongoDB Driver Prometheus Exporter must include code that initializes the MongoDB metrics exporter.
+        impact: |
+          Enables continuous visibility and root-cause analysis within central monitoring systems.
+        severity: Mandatory
+        required_context: single-file
+        software_version: all
+        reference_link:
+          - https://www.npmjs.com/package/prom-client
+          - https://www.npmjs.com/package/@christiangalsterer/mongodb-driver-prometheus-exporter
+          - https://pypi.org/project/prometheus-client/
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              const express = require('express');
+              const { MongoClient } = require('mongodb');
+              const promClient = require('prom-client');
+              const {
+                MongoDBDriverPrometheusExporter,
+              } = require('@christiangalsterer/mongodb-driver-prometheus-exporter');
+
+              const app = express();
+              const client = new MongoClient(process.env.MONGO_URI);
+              // Imports Prometheus but doesn't initialize MongoDB metrics exporter
+              app.listen(3000);
+            compliant: |
+              const express = require('express');
+              const { MongoClient } = require('mongodb');
+              const promClient = require('prom-client');
+              const {
+                MongoDBDriverPrometheusExporter,
+              } = require('@christiangalsterer/mongodb-driver-prometheus-exporter');
+
+              // Initialize MongoDB metrics exporter
+              new MongoDBDriverPrometheusExporter({ port: 9464 });
+              promClient.collectDefaultMetrics();
+
+              const client = new MongoClient(process.env.MONGO_URI);
+              await client.connect();
+
+              const app = express();
+              app.listen(3000);
+          # TypeScript examples
+          - non_compliant: |
+              import { FastifyInstance } from "fastify";
+              import { MongoClient } from "mongodb";
+              import promClient from "prom-client";
+              import { MongoDBDriverPrometheusExporter } from "@christiangalsterer/mongodb-driver-prometheus-exporter";
+
+              async function buildApp(): Promise<FastifyInstance> {
+                const fastify = require('fastify')();
+                // Has Prometheus imports but missing exporter initialization
+                return fastify;
+              }
+            compliant: |
+              import { FastifyInstance } from "fastify";
+              import { MongoClient } from "mongodb";
+              import promClient from "prom-client";
+              import { MongoDBDriverPrometheusExporter } from "@christiangalsterer/mongodb-driver-prometheus-exporter";
+
+              async function buildApp(): Promise<FastifyInstance> {
+                const fastify = require('fastify')();
+                
+                // Initialize MongoDB metrics exporter
+                new MongoDBDriverPrometheusExporter({ port: 9464 });
+                promClient.collectDefaultMetrics();
+
+                const client = new MongoClient(process.env.MONGO_URI!);
+                await client.connect();
+                
+                return fastify;
+              }
+          # Python examples
+          - non_compliant: |
+              from pymongo import MongoClient
+              from prometheus_client import start_http_server, Summary
+
+              client = MongoClient("mongodb://localhost:27017")
+              db = client.mydb
+              # Imports prometheus_client but doesn't start metrics server
+            compliant: |
+              from pymongo import MongoClient
+              from prometheus_client import start_http_server, Summary
+
+              # Start Prometheus endpoint on port 9464
+              start_http_server(9464)
+
+              mongo_query_time = Summary(
+                  'mongo_query_time_seconds',
+                  'Time spent processing MongoDB queries'
+              )
+
+              client = MongoClient("mongodb://localhost:27017")
+              db = client.mydb
+
+              @mongo_query_time.time()
+              def get_user(uid):
+                  return db.users.find_one({'_id': uid})
+
+      - title: "Log Slow MongoDB Commands"
+        description: |
+          MongoDB command listeners must log a warning when a command's execution time exceeds 100 ms.
+        impact: |
+          Enables early detection of query-performance regressions.
+        severity: Mandatory
+        required_context: single-file
+        software_version: all
+        reference_link:
+          - https://mongodb-node.netlify.app/docs/drivers/node/current/monitoring-and-logging/monitoring/
+          - https://pymongo.readthedocs.io/en/stable/api/pymongo/monitoring.html
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              const { MongoClient } = require('mongodb');
+              const client = new MongoClient(uri);
+              await client.connect();
+            compliant: |
+              const { MongoClient } = require('mongodb');
+              const client = new MongoClient(uri, { monitorCommands: true });
+
+              client.on('commandSucceeded', event => {
+                if (event.duration > 100) {               // duration is in ms
+                  console.warn(`Slow MongoDB command: ${event.commandName}`, {
+                    duration: event.duration,
+                  });
+                }
+              });
+
+              await client.connect();
+          # TypeScript examples
+          - non_compliant: |
+              import { MongoClient } from "mongodb";
+              const client = new MongoClient(uri);
+              await client.connect();
+            compliant: |
+              import { MongoClient } from "mongodb";
+
+              const client = new MongoClient(uri, { monitorCommands: true });
+
+              client.on("commandSucceeded", (event) => {
+                if (event.duration > 100) { // duration is in ms
+                  console.warn(`Slow MongoDB command: ${event.commandName}`, {
+                    duration: event.duration,
+                  });
+                }
+              });
+
+              await client.connect();
+          # Python examples
+          - non_compliant: |
+              from pymongo import MongoClient
+              client = MongoClient(uri)
+            compliant: |
+              from pymongo import MongoClient, monitoring
+              import logging
+
+              logger = logging.getLogger(__name__)
+
+              class SlowQueryLogger(monitoring.CommandListener):
+                  def succeeded(self, event):
+                      # 100 000 µs = 100 ms
+                      if event.duration_micros > 100000:
+                          logger.warning(
+                              "Slow MongoDB command %s took %.2f ms",
+                              event.command_name,
+                              event.duration_micros / 1000,
+                          )
+
+              monitoring.register(SlowQueryLogger())
+              client = MongoClient(uri)
+
+      - title: "Redact or Exclude Sensitive Data from Logs"
+        description: |
+          Logs must not contain full document payloads or raw user fields.
+        impact: |
+          Prevents leaking sensitive user data via logs into monitoring pipelines.
+        severity: High
+        required_context: single-file
+        software_version: all
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              console.log("Created user:", userDoc);
+            compliant: |
+              console.log("Created user id=%s, email=%s", userDoc._id, userDoc.email);
+          # TypeScript examples
+          - non_compliant: |
+              console.log("Order created:", order);
+            compliant: |
+              console.log(`Order created id=${order.id}, status=${order.status}`);
+          # Python examples
+          - non_compliant: |
+              print("Payment processed:", payment)
+            compliant: |
+              print(f"Payment processed id={payment['id']}, amount={payment['amount']}")
+
+  - name: "MongoDB Monitoring, Observability & Alerting on Configurations"
+    paths:
+      - '**/*.yaml'
+      - '**/*.yml'
+
+    policies:
+
+      - title: "Include Log-Forwarder Sidecar for MongoDB Pods"
+        description: |
+          Kubernetes Pod manifests running MongoDB must include a log-forwarder sidecar
+          container (e.g., fluent-bit or vector) that mounts the MongoDB log directory.
+        impact: |
+          Streams MongoDB logs to the cluster logging pipeline for centralized analysis.
+        severity: High
+        required_context: single-file
+        software_version: all
+        reference_link:
+          - https://docs.fluentbit.io/manual/installation/kubernetes
+          - https://vector.dev/docs/setup/deployment/roles/#sidecar
+        code_examples:
+          # YAML Examples
+          - non_compliant: |
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                name: mongo
+              spec:
+                containers:
+                  - name: mongo
+                    image: mongo:7.0
+            compliant: |
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                name: mongo
+              spec:
+                volumes:
+                  - name: mongo-logs
+                    emptyDir: {}
+                containers:
+                  - name: mongo
+                    image: mongo:7.0
+                    volumeMounts:
+                      - name: mongo-logs
+                        mountPath: /var/log/mongodb
+                  - name: fluent-bit
+                    image: fluent/fluent-bit:2.2
+                    args: ["-i", "tail",
+                          "-p", "path=/var/log/mongodb/*.log",
+                          "-o", "stdout"]
+                    volumeMounts:
+                      - name: mongo-logs
+                        mountPath: /var/log/mongodb
+
+  - name: "MongoDB Transactions & Consistency"
+    paths:
+      - '**/*.js'
+      - '**/*.ts'
+      - '**/*.py'
+
+    policies:
+
+      - title: "Limit Scope and Duration of Multi-Document Transactions"
+        description: |
+          Transactions must be scoped to fewer than 1,000 document writes and kept short.
+        impact: |
+          Prevents timeout, contention, and performance degradation as recommended by MongoDB best practices.
+        severity: Mandatory
+        required_context: single-file
+        software_version: all
+        reference_link: 
+          - https://www.mongodb.com/docs/manual/core/transactions-production-consideration/
+          - https://www.mongodb.com/resources/products/capabilities/performance-best-practices-transactions-and-read-write-concerns/
+
+        code_examples:
+          # JavaScript Examples
+          - non_compliant: |
+              const { MongoClient } = require('mongodb');
+              const client = new MongoClient(uri);
+              await client.connect();
+
+              const session = client.startSession();
+              try {
+                session.startTransaction();
+                // 1 200 documents written in a single transaction (violates limit)
+                const docs = Array.from({ length: 1200 }, (_, i) => ({ _id: i }));
+                await client.db('test').collection('orders')
+                            .insertMany(docs, { session });
+                await session.commitTransaction();
+              } catch (e) {
+                await session.abortTransaction();
+                throw e;
+              } finally {
+                await session.endSession();
+                await client.close();
+              }
+            compliant: |
+              const { MongoClient } = require('mongodb');
+              const client = new MongoClient(uri);
+              await client.connect();
+
+              const docs = Array.from({ length: 1200 }, (_, i) => ({ _id: i }));
+
+              await client.withSession(async session => {
+                for (let i = 0; i < docs.length; i += 500) {        // ≤ 500 per batch
+                  const batch = docs.slice(i, i + 500);
+                  await session.withTransaction(async () => {
+                    await client.db('test').collection('orders')
+                                .insertMany(batch, { session });
+                  });
+                }
+              });
+
+              await client.close();
+          # TypeScript examples
+          - non_compliant: |
+              import { MongoClient } from "mongodb";
+
+              const client = new MongoClient(uri);
+              await client.connect();
+
+              const session = client.startSession();
+              try {
+                session.startTransaction();
+                // Too many writes in a single transaction
+                const docs: { _id: number }[] = Array.from({ length: 1300 }, (_, i) => ({ _id: i }));
+                await client.db("test").collection("orders").insertMany(docs, { session });
+                await session.commitTransaction();
+              } catch (e) {
+                await session.abortTransaction();
+                throw e;
+              } finally {
+                await session.endSession();
+                await client.close();
+              }
+            compliant: |
+              import { MongoClient } from "mongodb";
+
+              const client = new MongoClient(uri);
+              await client.connect();
+
+              const docs: { _id: number }[] = Array.from({ length: 1200 }, (_, i) => ({ _id: i }));
+
+              // Batch into chunks of 400 for shorter, safe transactions
+              const BATCH_SIZE = 400;
+
+              for (let i = 0; i < docs.length; i += BATCH_SIZE) {
+                const batch = docs.slice(i, i + BATCH_SIZE);
+                const session = client.startSession();
+                try {
+                  await session.withTransaction(async () => {
+                    await client.db("test").collection("orders").insertMany(batch, { session });
+                  });
+                } finally {
+                  await session.endSession();
+                }
+              }
+
+              await client.close();
+          # Python examples
+          - non_compliant: |
+              from pymongo import MongoClient
+              client = MongoClient(uri)
+
+              session = client.start_session()
+              try:
+                  session.start_transaction()
+                  # 1 500 writes in one transaction (violates limit)
+                  big_batch = [{'_id': i} for i in range(1500)]
+                  client.db.orders.insert_many(big_batch, session=session)
+                  session.commit_transaction()
+              except Exception:
+                  session.abort_transaction()
+                  raise
+              finally:
+                  session.end_session()
+                  client.close()
+            compliant: |
+              from pymongo import MongoClient
+              client = MongoClient(uri)
+
+              docs = [{'_id': i} for i in range(1500)]               # 1 500 docs total
+
+              with client.start_session() as s:
+                  for i in range(0, len(docs), 500):                 # ≤ 500 per batch
+                      batch = docs[i:i + 500]
+                      with s.start_transaction():
+                          client.db.orders.insert_many(batch, session=s)
+
+              client.close()
+
+      - title: "Enforce Appropriate Read and Write Concerns with Journaling"
+        description: |
+          Transactions must use writeConcern “majority” and readConcern “majority” for critical operations.
+        impact: |
+          Ensures durability, consistency, and causal guarantees across replica sets or sharded clusters.
+        severity: High
+        required_context: single-file
+        software_version: all
+        reference_link: https://www.mongodb.com/docs/manual/core/write-concern/
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              await session.startTransaction();  // no explicit write/read concern
+            compliant: |
+              await session.startTransaction({
+                readConcern: { level: "majority" },
+                writeConcern: { w: "majority", j: true, wtimeout: 5000 }
+              });
+          # TypeScript examples
+          - non_compliant: |
+              import { MongoClient } from "mongodb";
+
+              const client = new MongoClient(uri);
+              await client.connect();
+
+              const session = client.startSession();
+              await session.startTransaction(); // No explicit concerns
+              // ...transaction logic...
+              await session.commitTransaction();
+              await session.endSession();
+            compliant: |
+              import { MongoClient, ReadConcern, WriteConcern } from "mongodb";
+
+              const client = new MongoClient(uri);
+              await client.connect();
+
+              const session = client.startSession();
+              await session.startTransaction({
+                readConcern: new ReadConcern("majority"),
+                writeConcern: new WriteConcern("majority", 1, true, 5000)
+              });
+              // ...critical transaction logic...
+              await session.commitTransaction();
+              await session.endSession();
+          # Python examples
+          - non_compliant: |
+              with client.start_session() as s:
+                  s.start_transaction()  # default concerns
+            compliant: |
+              with client.start_session() as s:
+                  with s.start_transaction(
+                    read_concern=ReadConcern("majority"),
+                    write_concern=WriteConcern(w="majority", j=True, wtimeout=5000)
+                  ):
+
+      - title: "Implement Transaction Retry Logic for Transient Failures"
+        description: |
+          Transactions must include retries on transient errors such as write conflicts or network errors.
+        impact: |
+          Ensures resilience and correctness under operational errors, aligning with MongoDB driver guidance.
+        severity: Mandatory
+        required_context: single-file
+        software_version: all
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              await transferFunds(session, ...); // no retry
+            compliant: |
+              async function transferFunds(...) {
+                for (let attempt = 0; attempt < 3; attempt++) {
+                  try {
+                    await session.withTransaction(async () => { /* ops */ });
+                    return;
+                  } catch (e) {
+                    if (e.errorLabels?.includes("TransientTransactionError")) continue;
+                    throw e;
+                  }
+                }
+                throw new Error("Transaction failed after retries");
+              }
+          # TypeScript examples
+          - non_compliant: |
+              await transferFunds(session, ...); // no retry logic
+            compliant: |
+              async function transferFunds(session: import("mongodb").ClientSession, ...args: any[]) {
+                const MAX_ATTEMPTS = 3;
+                for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+                  try {
+                    await session.withTransaction(async () => {
+                      // ...transactional operations, e.g. fund transfer...
+                      // Use args as needed
+                    });
+                    return;
+                  } catch (e: any) {
+                    if (Array.isArray(e.errorLabels) && e.errorLabels.includes("TransientTransactionError")) {
+                      if (attempt === MAX_ATTEMPTS) throw new Error("Transaction failed after retries");
+                      continue; // Retry on transient error
+                    }
+                    throw e;
+                  }
+                }
+              }
+          # Python examples
+          - non_compliant: |
+              with client.start_session() as s:
+                  with s.start_transaction():
+                      do_ops()
+            compliant: |
+              def transfer():
+                  for attempt in range(3):
+                      try:
+                          with client.start_session() as s:
+                              with s.start_transaction():
+                                  do_ops(session=s)
+                          return
+                      except Exception as e:
+                          if "TransientTransactionError" in getattr(e, "errorLabels", []):
+                              continue
+                          raise
+
+  - name: "MongoDB High Availability, Replication & Sharding"
+    paths:
+      - '**/*.js'
+      - '**/*.ts'
+      - '**/*.py'
+
+    policies:
+
+      - title: "Configure Replica Sets With Odd Number of Voting Members"
+        description: |
+          Replica sets must use an odd number of voting members.
+        impact: |
+          Ensures failover safety and avoids split-brain.
+        severity: High
+        required_context: single-file
+        software_version: all
+        reference_link: https://www.mongodb.com/docs/manual/core/replica-set-architecture/
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              rs.initiate({_id:"rs0",members:[{_id:0,host:"a"}, {_id:1,host:"b"}]})
+            compliant: |
+              rs.initiate({_id:"rs0",members:[{_id:0,host:"a"}, {_id:1,host:"b"}, {_id:2,host:"c"}]})
+          # TypeScript examples
+          - non_compliant: |
+              const config = {
+                _id: "rs0",
+                members: [
+                  { _id: 0, host: "a:27017" },
+                  { _id: 1, host: "b:27017" }
+                ]
+              };
+              await db.admin().command({ replSetInitiate: config });
+            compliant: |
+              const config = {
+                _id: "rs0",
+                members: [
+                  { _id: 0, host: "a:27017" },
+                  { _id: 1, host: "b:27017" },
+                  { _id: 2, host: "c:27017" }
+                ]
+              };
+              await db.admin().command({ replSetInitiate: config });
+          # Python examples
+          - non_compliant: |
+              rs_conf = {"_id": "rs0", "members": [{"_id": 0, "host": "a"}, {"_id": 1, "host": "b"}]}
+            compliant: |
+              rs_conf = {"_id": "rs0", "members": [{"_id": 0, "host": "a"}, {"_id": 1, "host": "b"}, {"_id": 2, "host": "c"}]}
+
+      - title: "Configure Replica-Set Read Preference and Enable Retryable Reads"
+        description: |
+          MongoClient initialization options must include both `readPreference` and `retryReads`.
+        impact: |
+          Ensures reads are routed to appropriate replica-set members and transient read errors are retried automatically.
+        severity: High
+        required_context: single-file
+        software_version: all
+        reference_link:
+          - https://www.mongodb.com/docs/manual/core/read-preference/
+          - https://www.mongodb.com/docs/manual/core/retryable-reads/
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              const { MongoClient } = require('mongodb');
+              const client = new MongoClient(process.env.MONGO_URI);
+              await client.connect();
+            compliant: |
+              const { MongoClient } = require('mongodb');
+              const client = new MongoClient(process.env.MONGO_URI, {
+                readPreference: 'primaryPreferred',
+                retryReads: true
+              });
+              await client.connect();
+          # TypeScript examples
+          - non_compliant: |
+              import { MongoClient } from 'mongodb';
+              const client = new MongoClient(process.env.MONGO_URI!);
+              await client.connect();
+            compliant: |
+              import { MongoClient } from 'mongodb';
+              const client = new MongoClient(process.env.MONGO_URI!, {
+                readPreference: 'primaryPreferred',
+                retryReads: true
+              });
+              await client.connect();
+          # Python examples
+          - non_compliant: |
+              from pymongo import MongoClient
+              import os
+              client = MongoClient(os.environ['MONGO_URI'])
+            compliant: |
+              from pymongo import MongoClient
+              import os
+              client = MongoClient(
+                os.environ['MONGO_URI'],
+                read_preference='primaryPreferred',
+                retryReads=True
+              )
+
+      - title: "Simulate Replica-Set Failover in Test Code"
+        description: |
+          Test code that connects to a MongoDB replica set must simulate a replica-set failover and assert that application logic still succeeds afterwards.
+        impact: |
+          Verifies that the driver and application logic tolerate elections
+          and reconnect automatically.
+        severity: High
+        required_context: multi-file
+        software_version: all
+        reference_link:
+          - https://www.npmjs.com/package/mongodb-topology-manager
+          - https://pymongo.readthedocs.io/en/stable/examples/high_availability.html
+
+        code_examples:
+          # JavaScript Examples
+          - non_compliant: |
+              // runs DB integration tests but never simulates failover
+              runDatabaseTests();
+            compliant: |
+              const { MongoClient } = require('mongodb');
+              const { ReplSet } = require('mongodb-topology-manager');
+              const assert = require('assert');
+
+              describe('replica failover', () => {
+                let replSet, client;
+
+                beforeAll(async () => {
+                  replSet = new ReplSet('rsTest', [
+                    { options: { port: 27017 } },
+                    { options: { port: 27018 } },
+                    { options: { port: 27019 } },
+                  ]);
+                  await replSet.purge();
+                  await replSet.start();
+                  client = await MongoClient.connect(
+                    'mongodb://localhost:27017,localhost:27018,localhost:27019/?replicaSet=rsTest'
+                  );
+                });
+
+                afterAll(async () => {
+                  await client.close();
+                  await replSet.stop();
+                });
+
+                test('application continues after primary step-down', async () => {
+                  await replSet.primary().stepDown(60);
+                  const ping = await client.db('test').command({ ping: 1 });
+                  assert.strictEqual(ping.ok, 1);
+                });
+              });
+          # TypeScript examples
+          - non_compliant: |
+              // Integration tests run but do not simulate failover
+              runDatabaseTests();
+            compliant: |
+              import { MongoClient } from "mongodb";
+              import { ReplSet } from "mongodb-topology-manager";
+              import assert from "assert";
+
+              describe("replica failover", () => {
+                let replSet: ReplSet;
+                let client: MongoClient;
+
+                beforeAll(async () => {
+                  replSet = new ReplSet("rsTest", [
+                    { options: { port: 27017 } },
+                    { options: { port: 27018 } },
+                    { options: { port: 27019 } },
+                  ]);
+                  await replSet.purge();
+                  await replSet.start();
+                  client = await MongoClient.connect(
+                    "mongodb://localhost:27017,localhost:27018,localhost:27019/?replicaSet=rsTest"
+                  );
+                });
+
+                afterAll(async () => {
+                  await client.close();
+                  await replSet.stop();
+                });
+
+                test("application continues after primary step-down", async () => {
+                  await replSet.primary().stepDown(60);
+                  // Wait a bit for the driver to reconnect
+                  await new Promise((resolve) => setTimeout(resolve, 2000));
+                  const ping = await client.db("test").command({ ping: 1 });
+                  assert.strictEqual(ping.ok, 1);
+                });
+              });
+          # Python Examples
+          - non_compliant: |
+              def test_db_operations(mongo_client):
+                  # uses the replica set but never checks failover
+                  assert mongo_client.test.command("ping")["ok"] == 1
+            compliant: |
+              import time, pytest
+
+              def test_failover(mongo_client):
+                  admin = mongo_client.admin
+                  try:
+                      # force primary to step down for 60 s
+                      admin.command({"replSetStepDown": 60, "force": True})
+                  except Exception:
+                      # network drop is expected when primary steps down
+                      pass
+
+                  # wait until a new primary is elected
+                  for _ in range(30):
+                      status = admin.command("replSetGetStatus")
+                      if status["myState"] == 1:      # 1 = PRIMARY
+                          break
+                      time.sleep(2)
+
+                  # application call must still succeed
+                  assert mongo_client.test.command("ping")["ok"] == 1
+
+  - name: "MongoDB Atlas-Specific Capabilities"
+    paths:
+      - '**/*.yaml'
+      - '**/*.yml'
+
+    policies:
+
+      - title: "Enable Atlas Cluster Auto-Scaling with Boundaries"
+        description: |
+          Atlas clusters must enable auto-scaling with both minimum and maximum resource boundaries.
+        impact: |
+          Auto-scaling saves cost and prevents OOM errors or poor performance on sudden traffic spikes.
+        severity: Mandatory
+        required_context: single-file
+        software_version: all
+        reference_link: https://www.mongodb.com/docs/atlas/cluster-autoscaling/
+        code_examples:
+          # YAML examples
+          - non_compliant: |
+              autoScaling:
+                compute: { enabled: false }
+            compliant: |
+              autoScaling:
+                compute:
+                  enabled: true
+                  minInstanceSize: M10
+                  maxInstanceSize: M80
+
+      - title: "Atlas Encryption at Rest Must Be Enabled"
+        description: |
+          Atlas clusters must enable encryption at rest.
+        impact: |
+          Ensures all cloud-stored data is protected per compliance standards.
+        severity: Mandatory
+        required_context: single-file
+        software_version: all
+        reference_link: https://www.mongodb.com/docs/atlas/security-cloud-encryption/
+        code_examples:
+          # YAML Examples
+          - non_compliant: |
+              # atlas-cluster.yaml
+              name: dev-cluster
+              providerSettings:
+                providerName: AWS
+                regionName: US_EAST_1
+              encryptionAtRest:
+                enabled: false
+            compliant: |
+              # atlas-cluster.yaml
+              name: prod-cluster
+              providerSettings:
+                providerName: AWS
+                regionName: US_EAST_1
+              encryptionAtRest:
+                enabled: true
+                awsKms:
+                  accessKeyID: "${AWS_ACCESS_KEY_ID}"
+                  secretAccessKey: "${AWS_SECRET_ACCESS_KEY}"
+                  customerMasterKeyID: "arn:aws:kms:us-east-1:123456789012:key/abcd..."
+                  region: "us-east-1"
+
+  - name: "MongoDB Operational Maintenance & Automation on Scripts"
+    paths:
+      - '**/*.sh'
+      - '**/*.py'
+
+    policies:
+
+      - title: "Backup Scripts Must Validate Restores and Log Results"
+        description: |
+          Every backup script must include an automated restore test and write the restore result (success or failure) to a log or stdout/stderr.
+        impact: |
+          Guarantees that backups are restorable and that failures surface in logs.
+        severity: Mandatory
+        required_context: multi-file
+        software_version: all
+        reference_link:
+          - https://www.mongodb.com/docs/manual/core/backups/
+          - https://www.mongodb.com/docs/manual/tutorial/backup-and-restore-tools/
+        code_examples:
+          # Script examples
+          - non_compliant: |
+              #!/usr/bin/env bash
+              # only performs a dump; no restore validation or logging
+              mongodump --out /backup/"$(date +%F)"
+            compliant: |
+              #!/usr/bin/env bash
+              set -euo pipefail
+
+              BACKUP_DIR=/backup/$(date +%F-%H%M%S)
+              RESTORE_DIR=/tmp/restore-test
+
+              # --- backup step ---
+              mongodump --out "$BACKUP_DIR"
+
+              # --- restore-test step ---
+              mongorestore --drop --dir "$BACKUP_DIR" --nsInclude test.* --nsFrom 'test.*' --nsTo 'restoretest.*'
+              RESTORE_STATUS=$?
+
+              # --- logging step ---
+              if [ $RESTORE_STATUS -eq 0 ]; then
+                echo "$(date) restore validation succeeded" >> /var/log/backup.log
+              else
+                echo "$(date) restore validation FAILED" >&2
+                exit $RESTORE_STATUS
+              fi
+          # Script examples
+          - non_compliant: |
+              #!/usr/bin/env python3
+              import subprocess
+              subprocess.check_call(["mongodump", "--out=/backup/now"])
+            compliant: |
+              #!/usr/bin/env python3
+              import subprocess, datetime, logging, tempfile, shutil, sys, os
+
+              logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+              ts = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+              backup_dir = f"/backup/{ts}"
+              restore_dir = tempfile.mkdtemp(prefix="mongorestore_")
+
+              try:
+                  # --- backup ---
+                  subprocess.check_call(["mongodump", "--out", backup_dir])
+
+                  # --- restore test ---
+                  subprocess.check_call([
+                      "mongorestore", "--drop",
+                      "--dir", backup_dir,
+                      "--nsInclude", "test.*",
+                      "--nsFrom", "test.*",
+                      "--nsTo", "restoretest.*",
+                  ])
+                  logging.info("restore validation succeeded")
+
+              except subprocess.CalledProcessError as e:
+                  logging.error("restore validation failed with exit code %s", e.returncode)
+                  sys.exit(e.returncode)
+              finally:
+                  shutil.rmtree(restore_dir, ignore_errors=True)
+
+      - title: "Sequential Node-by-Node Upgrade Scripts"
+        description: |
+          Upgrade scripts must stop, upgrade, and start one MongoDB node at a time, verifying replica-set health between nodes.
+        impact: |
+          Prevents accidental loss of quorum or service interruption during version upgrades.
+        severity: Mandatory
+        required_context: multi-file
+        software_version: all
+        code_examples:
+          # Script examples
+          - non_compliant: |
+              #!/usr/bin/env bash
+              # stops every node at once—no health checks
+              for node in host1 host2 host3; do
+                ssh "$node" "sudo systemctl stop mongod && sudo yum -y upgrade mongodb-org && sudo systemctl start mongod"
+              done
+            compliant: |
+              #!/usr/bin/env bash
+              set -euo pipefail
+              NODES=(host1 host2 host3)
+
+              for NODE in "${NODES[@]}"; do
+                echo "Upgrading $NODE"
+                ssh "$NODE" "sudo systemctl stop mongod"
+                ssh "$NODE" "sudo yum -y upgrade mongodb-org"
+                ssh "$NODE" "sudo systemctl start mongod"
+
+                # Wait until node rejoins replica set as SECONDARY
+                until mongo --quiet --host "$NODE" --eval 'quit(rs.isMaster().secondary ? 0 : 1)'; do
+                  sleep 5
+                done
+
+                # Verify replica-set is healthy before next node
+                if ! mongo --quiet --host "${NODES[0]}" --eval 'quit(rs.status().ok ? 0 : 1)'; then
+                  echo "Replica set not healthy after upgrading $NODE" >&2
+                  exit 1
+                fi
+              done
+
+  - name: "MongoDB Operational Maintenance & Automation on Configurations"
+    paths:
+      - '**/*.yaml'
+      - '**/*.yml'
+
+    policies:
+
+      - title: "Configure Resource Limits for Operator/Backup Pods"
+        description: |
+          Operator and backup pod configs must define resource limits.
+        impact: |
+          Prevents noisy neighbor risk, pod starvation, and unintended crashes in shared clusters.
+        severity: High
+        required_context: single-file
+        software_version: all
+        code_examples:
+          # YAML examples
+          - non_compliant: |
+              resources: {}
+            compliant: |
+              resources:
+                limits:
+                  cpu: "4"
+                  memory: "16Gi"
+
+      - title: "Configure Worker Threads for MongoDB Operator Pods"
+        description: |
+          MongoDB operator pod configs must explicitly set worker thread count via environment variables.
+        impact: |
+          Ensures predictable resource usage and performance for operator reconciliation.
+        severity: Medium
+        required_context: single-file
+        software_version: all
+        code_examples:
+          # YAML examples
+          - non_compliant: |
+              # MongoDB operator without thread configuration
+              containers:
+                - name: mongodb-kubernetes-operator
+                  image: quay.io/mongodb/mongodb-kubernetes-operator:0.7.8
+                  env:
+                    - name: WATCH_NAMESPACE
+                      value: "mongodb"
+            compliant: |
+              containers:
+                - name: mongodb-kubernetes-operator
+                  image: quay.io/mongodb/mongodb-kubernetes-operator:0.7.8
+                  env:
+                    - name: WATCH_NAMESPACE
+                      value: "mongodb"
+                    - name: MONGODB_OPERATOR_WORKER_THREADS
+                      value: "4"
+
+  - name: "MongoDB Migration Scripts"
+    paths:
+      - '**/*.js'
+      - '**/*.ts'
+      - '**/*.py'
+
+    policies:
+
+      - title: "Migration Scripts Must Be Versioned and Reversible"
+        description: |
+          Every migration file must
+            1. export (or define) an `up` function,
+            2. export (or define) a `down` function, and
+            3. include a version identifier (timestamp or semantic tag) in either
+              the filename or a header comment.
+        impact: |
+          Guarantees that migrations are idempotent, reversible, and ordered, letting CI/CD pipelines pick them up reliably.
+        severity: High
+        required_context: multi-file
+        software_version: all
+        reference_link:
+          - https://www.npmjs.com/package/migrate-mongo
+          - https://pypi.org/project/pymongo-migrate/
+        code_examples:
+          # JavaScript Examples
+          - non_compliant: |
+              // 20250730-add-index.js
+              /** version: 20250730 */
+              exports.up = async db => {
+                await db.collection('users').createIndex({ email: 1 });
+              };
+            compliant: |
+              // 20250730-add-index.js
+              /** version: 20250730 */
+              exports.up = async db => {
+                await db.collection('users').createIndex({ email: 1 });
+              };
+              exports.down = async db => {
+                await db.collection('users').dropIndex({ email: 1 });
+              };
+          # TypeScript examples
+          - non_compliant: |
+              // 20250730-add-index.ts
+              /** version: 20250730 */
+              import { Db } from "mongodb";
+
+              export async function up(db: Db): Promise<void> {
+                await db.collection("users").createIndex({ email: 1 });
+              }
+            compliant: |
+              // 20250730-add-index.ts
+              /** version: 20250730 */
+              import { Db } from "mongodb";
+
+              export async function up(db: Db): Promise<void> {
+                await db.collection("users").createIndex({ email: 1 });
+              }
+
+              export async function down(db: Db): Promise<void> {
+                await db.collection("users").dropIndex({ email: 1 });
+              }
+          # Python Examples
+          - non_compliant: |
+              # 2025_07_30_add_field.py
+              version = "2025_07_30"
+              def up(db):
+                  db.users.update_many({}, {"$set": {"active": True}})
+            compliant: |
+              # 2025_07_30_add_field.py
+              version = "2025_07_30"
+              def up(db):
+                  db.users.update_many({}, {"$set": {"active": True}})
+              def down(db):
+                  db.users.update_many({}, {"$unset": {"active": ""}})
+
+  - name: "MongoDB DevOps, Testing & Quality Assurance"
+    paths:
+      - '**/*.js'
+      - '**/*.ts'
+      - '**/*.py'
+
+    policies:
+
+      - title: "Mask Test Data Prior to Use"
+        description: |
+          Test data definitions must use explicit masking for all sensitive fields.
+        impact: |
+          Prevents accidental data leaks and test/production data mixing.
+        severity: High
+        required_context: multi-file
+        software_version: all
+        code_examples:
+          # JavaScript Examples
+          - non_compliant: |
+              const testUser = { email: "bob@client.com"};
+            compliant: |
+              import { maskEmail } from "./dataMasking.js";
+
+              const testUser = {
+                email: maskEmail("bob@client.com"),
+              };
+          # TypeScript examples
+          - non_compliant: |
+              const testCustomer = { phone: "+15555555555" };
+            compliant: |
+              import { maskPhone } from "./dataMasking";
+
+              const testCustomer = {
+                phone: maskPhone("+15555555555"),
+              };
+          # Python Examples
+          - non_compliant: |
+              test_user = {"email": "alice@corp.org"}
+            compliant: |
+              from data_masking import mask_email
+
+              test_user = {
+                  "email": mask_email("alice@corp.org"),
+              }
+
+      - title: "Test Setup Must Reset Database State"
+        description: |
+          Test files must invoke an explicit database-reset helper before each suite or test run (e.g., resetDatabase(), flush_db()).
+        impact: |
+          Prevents data leakage between tests and ensures deterministic results.
+        severity: High
+        required_context: multi-file
+        software_version: all
+        code_examples:
+          # JavaScript Examples
+          - non_compliant: |
+              // users.test.js
+              const request = require('supertest');
+              const app = require('../app');
+
+              test('GET /users', async () => {
+                const res = await request(app).get('/users');
+                expect(res.status).toBe(200);
+              });
+            compliant: |
+              // users.test.js
+              const request = require('supertest');
+              const app = require('../app');
+              const { resetDatabase } = require('./testUtils/dbTools');
+
+              beforeAll(async () => {
+                await resetDatabase();
+              });
+
+              test('GET /users', async () => {
+                const res = await request(app).get('/users');
+                expect(res.status).toBe(200);
+              });
+          # TypeScript examples
+          - non_compliant: |
+              // users.test.ts
+              import request from "supertest";
+              import app from "../app";
+
+              test("GET /users", async () => {
+                const res = await request(app).get("/users");
+                expect(res.status).toBe(200);
+              });
+            compliant: |
+              // users.test.ts
+              import request from "supertest";
+              import app from "../app";
+              import { resetDatabase } from "./testUtils/dbTools";
+
+              beforeEach(async (): Promise<void> => {
+                await resetDatabase();
+              });
+
+              test("GET /users", async (): Promise<void> => {
+                const res = await request(app).get("/users");
+                expect(res.status).toBe(200);
+              });
+          # Python Examples
+          - non_compliant: |
+              # test_users.py
+              def test_users_endpoint(client):
+                  resp = client.get("/users")
+                  assert resp.status_code == 200
+            compliant: |
+              # conftest.py
+              import pytest
+              from test_utils.db_tools import flush_db
+
+              @pytest.fixture(autouse=True, scope="function")
+              def reset_db():
+                  flush_db()
+                  yield
+
+      - title: "Test Setup Must Seed Baseline Data"
+        description: |
+          Test files must invoke a baseline-data seeding function before any assertions run.
+        impact: |
+          Guarantees deterministic test results by starting from a known dataset.
+        severity: High
+        required_context: multi-file
+        software_version: all
+        code_examples:
+          # JavaScript Examples
+          - non_compliant: |
+              // users.test.js
+              const request = require('supertest');
+              const app = require('../app');
+
+              test('GET /users returns 200', async () => {
+                const res = await request(app).get('/users');
+                expect(res.status).toBe(200);
+              });
+            compliant: |
+              // users.test.js
+              const request = require('supertest');
+              const app = require('../app');
+              const { seedBaseline } = require('./testUtils/dataSeed');
+
+              beforeAll(async () => {
+                await seedBaseline();
+              });
+
+              test('GET /users returns 200', async () => {
+                const res = await request(app).get('/users');
+                expect(res.status).toBe(200);
+              });
+          # TypeScript examples
+          - non_compliant: |
+              // users.test.ts
+              import request from "supertest";
+              import app from "../app";
+
+              test("GET /users returns 200", async () => {
+                const res = await request(app).get("/users");
+                expect(res.status).toBe(200);
+              });
+            compliant: |
+              // users.test.ts
+              import request from "supertest";
+              import app from "../app";
+              import { seedBaselineData } from "./testUtils/dataSeed";
+
+              beforeEach(async (): Promise<void> => {
+                await seedBaselineData();
+              });
+
+              test("GET /users returns 200", async (): Promise<void> => {
+                const res = await request(app).get("/users");
+                expect(res.status).toBe(200);
+              });
+          # Python Examples
+          - non_compliant: |
+              # test_users.py
+              import pytest
+              from fastapi.testclient import TestClient
+              from app import app
+
+              client = TestClient(app)
+
+              def test_users_endpoint():
+                  response = client.get("/users")
+                  assert response.status_code == 200
+            compliant: |
+              # test_users.py
+              import pytest
+              from fastapi.testclient import TestClient
+              from app import app
+              from test_utils.data_seed import load_fixtures
+
+              client = TestClient(app)
+
+              @pytest.fixture(autouse=True)
+              def baseline_data():
+                  load_fixtures()
+
+              def test_users_endpoint():
+                  response = client.get("/users")
+                  assert response.status_code == 200
+
+      - title: "Migration Scripts Must Support Conditional/Staged Execution"
+        description: |
+          Migration scripts must include conditional logic based on environment variables or configuration flags to allow staged execution.
+        impact: |
+          Reduces risk of large-scale outages or broken migrations by supporting canary or staged rollout.
+        severity: High
+        required_context: multi-file
+        software_version: all
+        code_examples:
+          # JavaScript Examples
+          - non_compliant: |
+              exports.up = async db => {
+                await db.collection('users').createIndex({ email: 1 });
+              };
+              exports.down = async db => {
+                await db.collection('users').dropIndex({ email: 1 });
+              };
+            compliant: |
+              const TARGET = process.env.MIGRATION_TARGET || 'all';  // canary|all
+
+              exports.up = async db => {
+                if (TARGET === 'canary') {
+                  return; // skip on canary pass
+                }
+                await db.collection('users').createIndex({ email: 1 });
+              };
+
+              exports.down = async db => {
+                if (TARGET === 'canary') return;
+                await db.collection('users').dropIndex({ email: 1 });
+              };
+          # TypeScript examples
+          - non_compliant: |
+              import { Db } from "mongodb";
+
+              export async function up(db: Db): Promise<void> {
+                await db.collection("users").createIndex({ email: 1 });
+              }
+
+              export async function down(db: Db): Promise<void> {
+                await db.collection("users").dropIndex({ email: 1 });
+              }
+            compliant: |
+              import { Db } from "mongodb";
+
+              const TARGET = process.env.MIGRATION_TARGET || "all"; // canary|all
+
+              export async function up(db: Db): Promise<void> {
+                if (TARGET === "canary") return; // skip on canary pass
+                await db.collection("users").createIndex({ email: 1 });
+              }
+
+              export async function down(db: Db): Promise<void> {
+                if (TARGET === "canary") return;
+                await db.collection("users").dropIndex({ email: 1 });
+              }
+          # Python Examples
+          - non_compliant: |
+              version = "2025_07_30"
+              def up(db):
+                  db.orders.update_many({}, {"$set": {"status": "NEW"}})
+              def down(db):
+                  db.orders.update_many({}, {"$unset": {"status": ""}})
+            compliant: |
+              import os
+              version = "2025_07_30"
+              TARGET = os.getenv("MIGRATION_TARGET", "all")  # canary|all
+
+              def up(db):
+                  if TARGET == "canary":
+                      return
+                  db.orders.update_many({}, {"$set": {"status": "NEW"}})
+
+              def down(db):
+                  if TARGET == "canary":
+                      return
+                  db.orders.update_many({}, {"$unset": {"status": ""}})
+
+  - name: "MongoDB Event-Driven Architectures & Change Streams"
+    paths:
+      - '**/*.js'
+      - '**/*.ts'
+      - '**/*.py'
+
+    policies:
+      - title: "Filter Change Stream Pipelines to Only Relevant Events"
+        description: |
+          In application code that implements MongoDB change streams, change stream pipelines must include $match filters for operationType or other relevant fields.
+        impact: |
+          Reduces compute and network load for downstream consumers.
+        severity: High
+        required_context: single-file
+        software_version: all
+        reference_link: https://www.mongodb.com/docs/manual/changeStreams/
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              db.collection.watch()
+            compliant: |
+              db.collection.watch([{ $match: { operationType: "insert" } }])
+          # TypeScript examples
+          - non_compliant: |
+              import { Collection } from "mongodb";
+              const orders: Collection = db.collection("orders");
+              orders.watch();
+            compliant: |
+              import { Collection, ChangeStreamDocument } from "mongodb";
+              const orders: Collection = db.collection("orders");
+
+              // Only watch insert events with type annotations
+              const changeStream = orders.watch<ChangeStreamDocument>([
+                { $match: { operationType: "insert" } }
+              ]);
+          # Python examples
+          - non_compliant: |
+              coll.watch()
+            compliant: |
+              coll.watch([{"$match": {"operationType": "insert"}}])
+
+      - title: "Add Metadata When Emitting Change Events to External Systems"
+        description: |
+          Change events sent to external systems must include metadata such as operation timestamp, user, and collection.
+        impact: |
+          Enables reliable downstream audit, correlation, and replay.
+        severity: High
+        required_context: single-file
+        software_version: all
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              // Watch MongoDB change stream and emit event without metadata
+              const { MongoClient } = require("mongodb");
+              const client = new MongoClient(uri);
+              await client.connect();
+              const changeStream = client.db("appdb").collection("users").watch();
+
+              changeStream.on("change", change => {
+                // Only action is emitted, no metadata
+                externalEmit({ action: change.operationType });
+              });
+            compliant: |
+              // Watch MongoDB change stream and emit event WITH metadata
+              const { MongoClient } = require("mongodb");
+              const client = new MongoClient(uri);
+              await client.connect();
+              const changeStream = client.db("appdb").collection("users").watch();
+
+              changeStream.on("change", change => {
+                externalEmit({
+                  action: change.operationType,
+                  ts: change.clusterTime.getHighBits() * 1000, // or Date.now() if available
+                  user: change.fullDocument?.updatedBy || "system",
+                  collection: "users"
+                });
+              });
+          # TypeScript examples
+          - non_compliant: |
+              import { MongoClient } from "mongodb";
+              const client = new MongoClient(uri);
+              await client.connect();
+              const users = client.db("appdb").collection("users");
+              const stream = users.watch();
+
+              stream.on("change", (change) => {
+                externalEmit({ action: change.operationType });
+              });
+            compliant: |
+              import { MongoClient, ChangeStreamDocument } from "mongodb";
+              const client = new MongoClient(uri);
+              await client.connect();
+              const users = client.db("appdb").collection("users");
+              const stream = users.watch<ChangeStreamDocument>();
+
+              interface ChangeEvent {
+                action: string;
+                ts: number;
+                user: string;
+                collection: string;
+              }
+
+              stream.on("change", (change) => {
+                const event: ChangeEvent = {
+                  action: change.operationType,
+                  ts: change.clusterTime ? change.clusterTime.getHighBits() * 1000 : Date.now(),
+                  user: (change.fullDocument && "updatedBy" in change.fullDocument)
+                    ? (change.fullDocument.updatedBy as string)
+                    : "system",
+                  collection: "users"
+                };
+                externalEmit(event);
+              });
+          # Python examples
+          - non_compliant: |
+              from pymongo import MongoClient
+              client = MongoClient(uri)
+              coll = client.appdb.users
+              with coll.watch() as stream:
+                  for change in stream:
+                      external_emit({"action": change["operationType"]})
+            compliant: |
+              import time
+              from pymongo import MongoClient
+              client = MongoClient(uri)
+              coll = client.appdb.users
+
+              def get_user(change):
+                  # This logic depends on your schema
+                  return change.get("fullDocument", {}).get("updatedBy", "system")
+
+              with coll.watch() as stream:
+                  for change in stream:
+                      event = {
+                          "action": change["operationType"],
+                          "ts": int(time.time() * 1000),
+                          "user": get_user(change),
+                          "collection": "users"
+                      }
+                      external_emit(event)
+
+      - title: "Change-Stream Consumers Must Calculate and Output Processing Lag"
+        description: |
+          Change-stream consumer source files must calculate processing lag from `event.clusterTime` and log a warning when it exceeds a specified threshold.
+        impact: |
+          Detects back-pressure and prevents silent data loss when consumers fall behind.
+        severity: High
+        required_context: single-file
+        software_version: all
+        reference_link: https://www.mongodb.com/docs/manual/changeStreams/
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              const pino = require('pino');
+              const logger = pino({ level: 'info' });
+              const stream = coll.watch();
+              stream.on('data', event => {
+                const lagMs = Date.now() - event.clusterTime.getHighBits() * 1000;
+                handleEvent(event);
+              });
+            compliant: |
+              const pino = require('pino');
+              const logger = pino({ level: 'info' });
+              const LAG_THRESHOLD_MS = 200;
+              const stream = coll.watch();
+              stream.on('data', event => {
+                const lagMs = Date.now() - event.clusterTime.getHighBits() * 1000;
+                if (lagMs > LAG_THRESHOLD_MS) {
+                  logger.warn(
+                    { changeStreamLagMs: lagMs, thresholdMs: LAG_THRESHOLD_MS },
+                    'Change-stream lag exceeded'
+                  );
+                }
+                handleEvent(event);
+              });
+          # TypeScript examples
+          - non_compliant: |
+              import pino from 'pino';
+              const logger = pino({ level: 'info' });
+              const users = db.collection('users');
+              const stream = users.watch();
+              stream.on('change', event => {
+                const ts = (event.clusterTime as any).getHighBits() * 1000;
+                const lagMs = Date.now() - ts;
+                handleEvent(event);
+              });
+            compliant: |
+              import pino from 'pino';
+              import { Collection, ChangeStreamDocument, Timestamp } from 'mongodb';
+              const logger = pino({ level: 'info' });
+              const LAG_THRESHOLD_MS = 200;
+              const users: Collection = db.collection('users');
+              const stream = users.watch<ChangeStreamDocument>();
+              stream.on('change', event => {
+                const ts = (event.clusterTime as Timestamp).getHighBits() * 1000;
+                const lagMs = Date.now() - ts;
+                if (lagMs > LAG_THRESHOLD_MS) {
+                  logger.warn(
+                    { changeStreamLagMs: lagMs, thresholdMs: LAG_THRESHOLD_MS, ns: users.namespace },
+                    'Change-stream lag exceeded'
+                  );
+                }
+                handleEvent(event);
+              });
+          # Python examples
+          - non_compliant: |
+              import logging
+              import time
+              from pymongo import MongoClient
+
+              logger = logging.getLogger(__name__)
+              handler = logging.StreamHandler()
+              logger.addHandler(handler)
+
+              client = MongoClient(uri)
+              coll = client.appdb.users
+              with coll.watch() as stream:
+                  for event in stream:
+                      cluster_time = getattr(event['clusterTime'], 'time', lambda: int(time.time()))()
+                      lag_ms = int(time.time() * 1000) - (cluster_time * 1000)
+                      handle_event(event)
+            compliant: |
+              import logging
+              import time
+              from pymongo import MongoClient
+
+              logger = logging.getLogger(__name__)
+              logger.setLevel(logging.INFO)
+              handler = logging.StreamHandler()
+              logger.addHandler(handler)
+
+              LAG_THRESHOLD_MS = 200
+              client = MongoClient(uri)
+              coll = client.appdb.users
+              with coll.watch() as stream:
+                  for event in stream:
+                      cluster_time = getattr(event['clusterTime'], 'time', lambda: int(time.time()))()
+                      lag_ms = int(time.time() * 1000) - (cluster_time * 1000)
+                      if lag_ms > LAG_THRESHOLD_MS:
+                          logger.warning(
+                            'changeStreamLagMs=%d thresholdMs=%d',
+                            lag_ms,
+                            LAG_THRESHOLD_MS
+                          )
+                      handle_event(event)
+
+      - title: "Handle Change-Stream Resume Failures"
+        description: |
+          Change-stream consumers must capture the latest resume token and reconnect with it when a resumable error (e.g., code 286) occurs.
+        impact: |
+          Ensures the pipeline resumes without missing events after transient interruptions.
+        severity: High
+        required_context: single-file
+        software_version: all
+        reference_link: https://www.mongodb.com/docs/manual/changeStreams/#change-stream-resume
+        code_examples:
+          # JavaScript examples
+          - non_compliant: |
+              const stream = coll.watch();
+              stream.on('data', handleEvent);
+              stream.on('error', console.error);
+            compliant: |
+              let resumeToken;
+
+              function startStream(options = {}) {
+                const stream = coll.watch([], options);
+                stream.on('data', event => {
+                  resumeToken = event._id;
+                  handleEvent(event);
+                });
+                stream.on('error', err => {
+                  if (err.code === 286 && resumeToken) {
+                    console.warn('Resuming from token');
+                    startStream({ resumeAfter: resumeToken });
+                  } else {
+                    console.error(err);
+                  }
+                });
+              }
+
+              startStream();
+          # TypeScript examples
+          - non_compliant: |
+              import { Collection } from "mongodb";
+              const users: Collection = db.collection("users");
+              const stream = users.watch();
+              stream.on("change", handleEvent);
+              stream.on("error", console.error);
+            compliant: |
+              import { Collection, ChangeStreamDocument, ResumeToken } from "mongodb";
+              const users: Collection = db.collection("users");
+              let resumeToken: ResumeToken | undefined;
+
+              function startStream(options: Record<string, any> = {}): void {
+                const stream = users.watch<ChangeStreamDocument>([], options);
+                stream.on("change", (event) => {
+                  resumeToken = event._id;
+                  handleEvent(event);
+                });
+                stream.on("error", (err: any) => {
+                  if (err.code === 286 && resumeToken) {
+                    console.warn("Resuming from token");
+                    startStream({ resumeAfter: resumeToken });
+                  } else {
+                    console.error(err);
+                  }
+                });
+              }
+
+              startStream();
+          # Python examples
+          - non_compliant: |
+              from pymongo import MongoClient
+
+              coll = MongoClient(uri).appdb.users
+
+              with coll.watch() as stream:
+                  for event in stream:
+                      handle_event(event)
+            compliant: |
+              from pymongo import MongoClient
+
+              coll = MongoClient(uri).appdb.users
+
+              def stream_with_resume():
+                  resume_token = None
+
+                  def start_stream(options=None):
+                      nonlocal resume_token
+                      try:
+                          with coll.watch([], **(options or {})) as stream:
+                              for event in stream:
+                                  resume_token = event["_id"]
+                                  handle_event(event)
+                      except Exception as e:
+                          # Error code 286: ChangeStreamFatalError
+                          code = getattr(e, "code", None)
+                          if code == 286 and resume_token:
+                              print("Resuming from token")
+                              start_stream({"resume_after": resume_token})
+                          else:
+                              raise
+
+                  start_stream()
+
+              stream_with_resume()
+
+      - title: "Use Majority Read/Write Concern for Change Stream Consumers/Producers"
+        description: |
+          Change stream consumers and producers must use read and write concern "majority".
+        impact: |
+          Ensures events are durable on a majority of replica-set members and that consumers see only committed data.
+        severity: High
+        required_context: single-file
+        software_version: all
+        reference_link: https://www.mongodb.com/docs/manual/changeStreams/
+        code_examples:
+          # JavaScript Examples
+          - non_compliant: |
+              const client = new MongoClient(uri);
+              await client.connect();
+
+              await client.db('shop').collection('orders').insertOne(orderDoc);
+
+              const stream = client.db('shop').collection('orders').watch();
+              stream.on('data', handleEvent);
+            compliant: |
+              import { MongoClient } from 'mongodb';
+              const client = new MongoClient('mongodb://localhost:27017/?replicaSet=rs0');
+              await client.connect();
+
+              // consumer
+              const stream = client
+                .db('shop')
+                .collection('orders')
+                .watch([], { readConcern: { level: 'majority' } });
+              stream.on('data', (change) => console.log('event', change.fullDocument));
+
+              // producer
+              await client
+                .db('shop')
+                .collection('orders')
+                .insertMany(
+                  [{ _id: 1, total: 99 }, { _id: 2, total: 149 }],
+                  { writeConcern: { w: 'majority' } }
+                );
+          # TypeScript examples
+          - non_compliant: |
+              import { MongoClient } from "mongodb";
+              const client = new MongoClient(uri);
+              await client.connect();
+
+              await client.db("shop").collection("orders").insertOne(orderDoc);
+
+              const stream = client.db("shop").collection("orders").watch();
+              stream.on("data", handleEvent);
+            compliant: |
+              import { MongoClient, ReadConcern, WriteConcern } from "mongodb";
+              const client = new MongoClient("mongodb://localhost:27017/?replicaSet=rs0");
+              await client.connect();
+
+              // Consumer: change stream with majority read concern
+              const orders = client.db("shop").collection("orders").withOptions({
+                readConcern: new ReadConcern("majority")
+              });
+              const stream = orders.watch();
+              stream.on("data", (change) => {
+                console.log("event", change.fullDocument);
+              });
+
+              // Producer: writes with majority write concern
+              await orders.withOptions({
+                writeConcern: new WriteConcern("majority")
+              }).insertMany([
+                { _id: 1, total: 99 },
+                { _id: 2, total: 149 }
+              ]);
+          # Python Examples
+          - non_compliant: |
+              client = MongoClient(uri)
+
+              client.shop.orders.insert_one(order_doc)
+
+              stream = client.shop.orders.watch()
+              for change in stream:
+                  handle_event(change)
+            compliant: |
+              from pymongo import MongoClient, WriteConcern, ReadConcern
+
+              client = MongoClient("mongodb://localhost:27017/?replicaSet=rs0")
+
+              # consumer
+              majority_rc = ReadConcern("majority")
+              stream = (
+                  client["shop"]
+                  .get_collection("orders")
+                  .with_options(read_concern=majority_rc)
+                  .watch()
+              )
+              print("consumer watching …")
+
+              # producer
+              majority_wc = WriteConcern("majority")
+              client["shop"].get_collection("orders")\
+                    .with_options(write_concern=majority_wc)
+                    .insert_many([
+                        {"_id": 1, "total": 99},
+                        {"_id": 2, "total": 149},
+                    ])
+
+              for change in stream:
+                  print("event", change["fullDocument"])
+
+  - name: "MongoDB Realm & Mobile Sync"
+    paths:
+      - '**/*.swift'
+      - '**/*.kt'
+      - '**/*.java'
+    policies:
+
+      - title: "Enable Partition-Based or Flexible Sync"
+        description: |
+          Code must configure Realm with partition-based or flexible sync mode.
+        impact: |
+          Ensures selective data sync for better performance and access control.
+        severity: Mandatory
+        required_context: single-file
+        software_version: all
+        code_examples:
+          # Swift examples
+          - non_compliant: |
+              let config = Realm.Configuration()
+              let realm = try! Realm(configuration: config)
+            compliant: |
+              let partitionValue = "myPartition"
+              let config = Realm.Configuration(syncConfiguration: SyncConfiguration(partitionValue: partitionValue, user: app.currentUser!))
+              let realm = try! Realm(configuration: config)
+          # Kotlin examples
+          - non_compliant: |
+              val config = RealmConfiguration.Builder().build()
+              val realm = Realm.getInstance(config)
+            compliant: |
+              val partitionValue = "myPartition"
+              val config = SyncConfiguration.Builder(user, partitionValue).build()
+              val realm = Realm.getInstance(config)
+          # Java examples
+          - non_compliant: |
+              // No sync or legacy local-only config
+              RealmConfiguration config = new RealmConfiguration.Builder().build();
+              Realm realm = Realm.getInstance(config);
+            compliant: |
+              // Partition-based sync
+              String partitionValue = "myPartition";
+              User user = app.currentUser(); // Assume app is your App instance
+              SyncConfiguration config = new SyncConfiguration.Builder(user, partitionValue).build();
+              Realm realm = Realm.getInstance(config);
+
+              // OR Flexible Sync (if using Realm Java SDK 10.10.0+)
+              // import io.realm.mongodb.sync.SyncConfiguration;
+              User user = app.currentUser();
+              SyncConfiguration flexibleConfig = SyncConfiguration
+                  .Builder(user)
+                  .flexibleSync()
+                  .build();
+              Realm flexibleRealm = Realm.getInstance(flexibleConfig);
+
+      - title: "Restrict Data Access Using Fine-Grained Permissions"
+        description: |
+          Code must define Realm permissions to limit data access by user or role.
+        impact: |
+          Protects user data and prevents unauthorized access.
+        severity: High
+        required_context: single-file
+        software_version: all
+        code_examples:
+          # Swift Examples
+          - non_compliant: |
+              import RealmSwift
+
+              // Opens a local Realm with default configuration — every user
+              // could read or write every object.
+              let realm = try! Realm()
+
+              // Anyone can query all Task objects
+              let tasks = realm.objects(Task.self)
+            compliant: |
+              import RealmSwift
+
+              // Assume you already have an authenticated App Services user:
+              let user = app.currentUser!
+
+              // Create a Flexible-Sync configuration that will download only
+              // the objects allowed by this user's subscriptions.
+              var config = user.flexibleSyncConfiguration()
+              config.objectTypes = [User.self, Task.self]   // limit schema
+
+              // Open the synced Realm (downloadBeforeOpen: .always guarantees
+              // see only permitted data before proceeding).
+              let realm = try await Realm(
+                configuration: config,
+                downloadBeforeOpen: .always
+              )
+
+              // Restrict data: only Task documents whose userId matches me.
+              try await realm.subscriptions.update {
+                // Remove any existing “owner-tasks” subscription first (idempotent)
+                $0.remove(named: "owner-tasks")
+                // Add a named subscription filtering by user-specific field
+                $0.append(
+                  Query<Task> { userId == user.id },
+                  name: "owner-tasks"
+                )
+              }
+
+              // From this point forward, queries return **only** the owner's tasks
+              let myTasks = realm.objects(Task.self)
+
+            # Kotlin Examples
+          - non_compliant: |
+              import io.realm.kotlin.Realm
+              import io.realm.kotlin.RealmConfiguration
+
+              // Opens a local Realm with default configuration — open access.
+              val realm = Realm.open(RealmConfiguration.Builder(setOf(Task::class)).build())
+
+              // Anyone can read every Task
+              val tasks = realm.query<Task>().find()
+            compliant: |
+              import io.realm.kotlin.Realm
+              import io.realm.kotlin.RealmConfiguration
+              import io.realm.kotlin.ext.query
+              import io.realm.kotlin.mongodb.App
+              import io.realm.kotlin.mongodb.User
+              import io.realm.kotlin.mongodb.subscriptions
+
+              val app = App.create("your-app-id")
+              val user: User = app.currentUser!!
+
+              // Flexible-Sync config limited to User & Task.
+              val config = RealmConfiguration
+                .Builder(schema = setOf(User::class, Task::class))
+                .syncSetup(user) {
+                  initialSubscriptions { realm ->
+                    add(realm.query<Task>("userId == $0", user.id), "owner-tasks")
+                  }
+                }
+                .build()
+
+              val realm = Realm.open(config)
+
+              // Only the owner's tasks are visible
+              val myTasks = realm.query<Task>().find()
+
+          # Java Examples
+          - non_compliant: |
+              import io.realm.Realm;
+
+              // Opens the default local Realm — unrestricted access.
+              Realm realm = Realm.getDefaultInstance();
+
+              // Anyone can read every Task
+              RealmResults<Task> tasks = realm.where(Task.class).findAll();
+            compliant: |
+              import io.realm.Realm;
+              import io.realm.RealmConfiguration;
+              import io.realm.mongodb.App;
+              import io.realm.mongodb.User;
+              import io.realm.mongodb.sync.SyncConfiguration;
+              import io.realm.mongodb.subscriptions.Subscription;
+
+              App app = new App("your-app-id");
+              User user = app.currentUser();
+
+              // Flexible-Sync configuration scoped to User & Task.
+              SyncConfiguration config = new SyncConfiguration.Builder(user)
+                      .allowQueriesOnUiThread(true)
+                      .schema(User.class, Task.class)
+                      .initialSubscriptions(realm -> {
+                          realm.getSubscriptions().add(
+                              Subscription.create("owner-tasks",
+                                  realm.where(Task.class).equalTo("userId", user.getId()))
+                          );
+                      })
+                      .build();
+
+              Realm realm = Realm.getInstance(config);
+
+              // Only the owner's tasks are visible
+              RealmResults<Task> myTasks = realm.where(Task.class).findAll();
+
+      - title: "Configure Realm with an Encryption Key"
+        description: |
+          Realm instances must be opened with an explicit encryptionKey parameter.
+        impact: |
+          Encrypts Realm files at rest to protect sensitive data if a device or disk image is compromised.
+        severity: High
+        required_context: single-file
+        software_version: all
+        code_examples:
+          # Swift Examples
+          - non_compliant: |
+              import RealmSwift
+
+              // Opens Realm without encryption
+              let config = Realm.Configuration()
+              let realm  = try! Realm(configuration: config)
+            compliant: |
+              import RealmSwift
+
+              // Any secure-retrieval helper is acceptable; static key shown for demo.
+              let key = Data(repeating: 0xA5, count: 64)   // 64-byte key
+              let config = Realm.Configuration(encryptionKey: key)
+              let realm  = try! Realm(configuration: config)
+
+          # Kotlin Examples
+          - non_compliant: |
+              import io.realm.kotlin.Realm
+              import io.realm.kotlin.RealmConfiguration
+
+              // Opens Realm without encryption
+              val config = RealmConfiguration.Builder(schema = setOf(Task::class)).build()
+              val realm  = Realm.open(config)
+            compliant: |
+              import io.realm.kotlin.Realm
+              import io.realm.kotlin.RealmConfiguration
+
+              val key = ByteArray(64) { 0xA5.toByte() }     // demo key bytes
+              val config = RealmConfiguration
+                  .Builder(schema = setOf(Task::class))
+                  .encryptionKey(key)
+                  .build()
+              val realm = Realm.open(config)
+
+          # Java Examples
+          - non_compliant: |
+              import io.realm.Realm;
+
+              // Opens default Realm without encryption
+              Realm realm = Realm.getDefaultInstance();
+            compliant: |
+              import io.realm.Realm;
+              import io.realm.RealmConfiguration;
+
+              byte[] key = new byte[64];
+              Arrays.fill(key, (byte) 0xA5);                // demo key bytes
+              RealmConfiguration config = new RealmConfiguration
+                  .Builder()
+                  .encryptionKey(key)
+                  .build();
+              Realm realm = Realm.getInstance(config);
+
+      - title: "Avoid Deprecated MongoDB Realm SDK APIs"
+        description: |
+          Application code must not call MongoDB Realm Mobile SDK symbols that are annotated @Deprecated (Swift, Kotlin) or marked deprecated in Javadoc. Use the documented replacement APIs instead.
+        impact: |
+          Prevents build-time deprecation warnings from turning into runtime breaks when the SDK removes obsolete methods.
+        severity: High
+        required_context: single-file
+        software_version: all
+        reference_link:
+          - https://github.com/realm/realm-swift/blob/master/CHANGELOG.md
+          - https://github.com/realm/realm-java/blob/master/CHANGELOG.md
+        code_examples:
+          # Swift Examples
+          - non_compliant: |
+              import RealmSwift
+
+              // Deprecated in RealmSwift 10.38: asyncOpen → use async/await open
+              Realm.asyncOpen(configuration: config) { result in
+                // …
+              }
+            compliant: |
+              import RealmSwift
+
+              // Replacement: async/await Realm.open
+              let realm = try await Realm(
+                configuration: config,
+                downloadBeforeOpen: .always
+              )
+
+          # Kotlin Examples
+          - non_compliant: |
+              import io.realm.kotlin.Realm
+              import io.realm.kotlin.mongodb.SyncConfiguration
+
+              // Deprecated constructor (partition-based) removed in Realm Kotlin 1.10
+              val cfg = SyncConfiguration.Builder(user, "myPartition").build()
+              val realm = Realm.open(cfg)
+            compliant: |
+              import io.realm.kotlin.Realm
+              import io.realm.kotlin.mongodb.SyncConfiguration
+
+              // Replacement: flexible-sync builder without partition arg
+              val cfg = SyncConfiguration.Builder(user)
+                .initialSubscriptions { /* … */ }
+                .build()
+              val realm = Realm.open(cfg)
+
+          # Java Examples
+          - non_compliant: |
+              import io.realm.Realm;
+              import io.realm.mongodb.sync.SyncConfiguration;
+
+              // Deprecated in Realm Java 10.10: partition-value ctor
+              SyncConfiguration cfg = new SyncConfiguration.Builder(user, "myPartition").build();
+              Realm realm = Realm.getInstance(cfg);
+            compliant: |
+              import io.realm.Realm;
+              import io.realm.mongodb.sync.SyncConfiguration;
+
+              // Replacement: builder without partition arg + setPartitionValue
+              SyncConfiguration cfg = new SyncConfiguration.Builder(user)
+                  .partitionValue("myPartition")
+                  .build();
+              Realm realm = Realm.getInstance(cfg);
+
+      - title: "Minimize Data Movement in Sync Configuration"
+        description: |
+          Realm sync configuration must project only required fields or objects when possible.
+        impact: |
+          Reduces bandwidth and local storage use on the device.
+        severity: High
+        required_context: single-file
+        software_version: all
+        code_examples:
+          # Swift examples
+          - non_compliant: |
+              // Syncing whole collection
+              subscriptions.update {
+                add(Query<Task>())
+              }
+            compliant: |
+              // Only syncing incomplete tasks for this user
+              subscriptions.update {
+                add(Query<Task> { isComplete == false && ownerId == app.currentUser!.id })
+              }
+          # Kotlin examples
+          - non_compliant: |
+              // Sync all items
+              config = SyncConfiguration.Builder(user, "partition").build()
+            compliant: |
+              // Sync only needed items using flexible sync
+              val query = realm.where<Task>().equalTo("ownerId", currentUser.id).and().equalTo("isComplete", false)
+              val config = SyncConfiguration.Builder(user, "partition").addInitialSubscription(query).build()
+          # Java examples
+          - non_compliant: |
+              // Sync entire collection or partition (overly broad)
+              String partitionValue = "partition";
+              SyncConfiguration config = new SyncConfiguration.Builder(user, partitionValue).build();
+              Realm realm = Realm.getInstance(config);
+            compliant: |
+              // Flexible sync: subscribe to only incomplete tasks for current user
+              SyncConfiguration flexibleConfig = new SyncConfiguration.Builder(user)
+                  .flexibleSync()
+                  .initialSubscriptions(subs -> {
+                      subs.add(realmQuery -> realmQuery
+                          .where(Task.class)
+                          .equalTo("ownerId", user.getId())
+                          .equalTo("isComplete", false)
+                      );
+                  })
+                  .build();
+              Realm realm = Realm.getInstance(flexibleConfig);
+
+              // If using partition-based sync but want to minimize class exposure, limit model fields
+              // by declaring only needed fields in your RealmObject class (not shown here).
+
+
+  - name: "Industry-Specific Compliance & Data Governance"
+    paths:
+      - '**/*.js'
+      - '**/*.ts'
+      - '**/*.py'
+
+    policies:
+
+      - title: "Enforce Explicit Field Projection in Queries"
+        description: |
+          Every MongoDB find or aggregate call that returns documents must include a projection object listing the fields to return.
+        impact: |
+          Reduces accidental exposure of personal data and lowers network overhead.
+        severity: High
+        required_context: single-file
+        software_version: all
+        code_examples:
+          # JavaScript Examples
+          - non_compliant: |
+              const users = await db.collection('users').find({}).toArray();
+            compliant: |
+              // ✔ Returns only email; omits _id
+              const users = await db.collection('users')
+                                    .find({}, { projection: { email: 1, _id: 0 } })
+                                    .toArray();
+          # TypeScript examples
+          - non_compliant: |
+              import { Collection } from "mongodb";
+              const users: Collection = db.collection("users");
+              const result = await users.find({}).toArray();
+            compliant: |
+              import { Collection, Document } from "mongodb";
+              interface PublicUser {
+                email: string;
+              }
+              const users: Collection<PublicUser> = db.collection<PublicUser>("users");
+              // Returns only email, omits _id (typed result)
+              const result: PublicUser[] = await users
+                .find({}, { projection: { email: 1, _id: 0 } })
+                .toArray();
+          # Python Examples
+          - non_compliant: |
+              users = list(db.users.find({}))
+            compliant: |
+              users = list(db.users.find({}, {"name": 1, "dob": 1, "_id": 0}))
+
+      - title: "Audit-Log Writes to Sensitive Collections"
+        description: |
+          Any code that inserts, updates, or deletes documents in the
+          following MongoDB collections **must call an audit-logging helper
+          immediately before the write:
+
+            • users   (PII such as email)  
+            • records (field: val)  
+            • cases   (field: status)
+
+          Acceptable helpers include `auditLog()` in JavaScript/TypeScript or
+          `log_access()` in Python.
+        impact: |
+          Guarantees traceability for high-risk data changes.
+        severity: High
+        required_context: single-file
+        software_version: all
+        code_examples:
+          # JavaScript Examples
+          - non_compliant: |
+              // No audit log for sensitive write
+              await db.collection('records')
+                      .updateOne({ _id }, { $set: { val: 'X' } });
+            compliant: |
+              // Audit log precedes the write
+              auditLog('records.update', { _id, userId });
+              await db.collection('records')
+                      .updateOne({ _id }, { $set: { val: 'X' } });
+          # TypeScript examples
+          - non_compliant: |
+              // No audit log for sensitive write
+              await db.collection("users").insertOne({ email: "bob@example.com" });
+
+              await db.collection("records").updateOne({ _id }, { $set: { val: "Y" } });
+
+              await db.collection("cases").deleteOne({ caseId });
+            compliant: |
+              // Audit log precedes sensitive writes
+
+              // For users collection (PII)
+              auditLog("users.insert", { email: "bob@example.com", userId });
+              await db.collection("users").insertOne({ email: "bob@example.com" });
+
+              // For records collection (val field)
+              auditLog("records.update", { _id, userId });
+              await db.collection("records").updateOne({ _id }, { $set: { val: "Y" } });
+
+              // For cases collection (status field)
+              auditLog("cases.delete", { caseId, userId });
+              await db.collection("cases").deleteOne({ caseId });
+          # Python
+          - non_compliant: |
+              # No audit log for sensitive write
+              db.cases.update_one({"id": cid}, {"$set": {"status": "open"}})
+            compliant: |
+              # Audit log precedes the write
+              log_access(user_id, "cases.update", cid)
+              db.cases.update_one({"id": cid}, {"$set": {"status": "open"}})
